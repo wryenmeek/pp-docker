@@ -1,0 +1,44 @@
+{
+  "name": "pp-docker",
+  "version": "0.1.0",
+  "description": "Auto-containerize and register printing-press-library MCP servers into Docker Desktop",
+  "license": "MIT",
+  "author": "wryenmeek",
+  "type": "module",
+  "bin": {
+    "pp-docker": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "commander": "^13.1.0",
+    "execa": "^9.5.2",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.6"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "docker",
+    "docker-desktop",
+    "printing-press",
+    "ai-agents"
+  ]
+}
