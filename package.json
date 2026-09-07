@@ -18,9 +18,16 @@
   },
   "scripts": {
     "build": "tsc",
-    "watch": "tsc --watch",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome lint .",
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage --coverage-reporter=text",
+    "knip": "knip",
+    "ci": "biome check . && tsc --noEmit && knip && bun test --coverage",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
@@ -29,9 +36,12 @@
     "yaml": "^2.7.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
+    "@biomejs/cli-darwin-arm64": "^2.5.12",
+    "@types/bun": "^1.4.1",
     "@types/node": "^22.13.5",
-    "typescript": "^5.7.3",
-    "vitest": "^3.0.6"
+    "knip": "^6.34.0",
+    "typescript": "^5.7.3"
   },
   "keywords": [
     "mcp",

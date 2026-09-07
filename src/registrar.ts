@@ -1,9 +1,9 @@
-import { execa } from 'execa';
 import fs from 'node:fs/promises';
-import path from 'node:path';
 import os from 'node:os';
+import path from 'node:path';
+import { execa } from 'execa';
 import YAML from 'yaml';
-import { ToolMeta, DockerMcpServerSpec } from './types.js';
+import type { DockerMcpServerSpec, ToolMeta } from './types.js';
 
 /**
  * Builds the Docker MCP Server specification object.
@@ -39,7 +39,7 @@ export function createServerSpec(meta: ToolMeta): DockerMcpServerSpec {
 export async function registerServer(
   meta: ToolMeta,
   profile: string = 'printing-press',
-  dryRun: boolean = false
+  dryRun: boolean = false,
 ): Promise<{ yamlPath: string }> {
   const serversDir = path.join(os.homedir(), '.docker', 'mcp', 'servers');
   const yamlPath = path.join(serversDir, `${meta.slug}-pp-mcp.yaml`);
@@ -61,37 +61,15 @@ export async function registerServer(
 
   // 2. Ensure profile exists
   try {
-    const listRes = await execa('docker', [
-      'mcp',
-      'profile',
-      'list',
-      '--format',
-      'json',
-    ]);
+    const listRes = await execa('docker', ['mcp', 'profile', 'list', '--format', 'json']);
     if (!listRes.stdout.includes(`"${profile}"`)) {
       console.log(`==> Creating profile '${profile}'...`);
-      await execa('docker', [
-        'mcp',
-        'profile',
-        'create',
-        '--name',
-        profile,
-        '--id',
-        profile,
-      ]);
+      await execa('docker', ['mcp', 'profile', 'create', '--name', profile, '--id', profile]);
     }
   } catch {
     // If command fails, attempt creation anyway
     try {
-      await execa('docker', [
-        'mcp',
-        'profile',
-        'create',
-        '--name',
-        profile,
-        '--id',
-        profile,
-      ]);
+      await execa('docker', ['mcp', 'profile', 'create', '--name', profile, '--id', profile]);
     } catch {
       // Profile likely already exists
     }

@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { createServerSpec } from '../src/registrar.js';
-import { ToolMeta } from '../src/types.js';
+import { describe, expect, it } from 'bun:test';
+import { createServerSpec, registerServer } from '../src/registrar.js';
+import type { ToolMeta } from '../src/types.js';
 
 describe('createServerSpec', () => {
   const dummyMeta: ToolMeta = {
@@ -41,5 +41,10 @@ describe('createServerSpec', () => {
 
     const spec = createServerSpec(unauthMeta);
     expect(spec.secrets).toBeUndefined();
+  });
+
+  it('handles dry-run registration cleanly', async () => {
+    const res = await registerServer(dummyMeta, 'test-profile', true);
+    expect(res.yamlPath).toContain('jules-pp-mcp.yaml');
   });
 });

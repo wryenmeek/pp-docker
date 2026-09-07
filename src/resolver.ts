@@ -1,4 +1,4 @@
-import { ToolMeta } from './types.js';
+import type { ToolMeta } from './types.js';
 
 /**
  * Extracts a bare tool slug from a URL, release tag, or bare name.
@@ -41,19 +41,19 @@ export async function resolveTool(input: string): Promise<ToolMeta> {
 
   let categoryPath = '';
   let description = `Agent-native ${slug} MCP server`;
-  let requiresAuth = true;
+  const requiresAuth = true;
 
   // 1. Attempt GitHub Release API
   try {
     const res = await fetch(
       `https://api.github.com/repos/mvanhorn/printing-press-library/releases/tags/${tag}`,
-      { headers: { 'User-Agent': 'pp-docker' } }
+      { headers: { 'User-Agent': 'pp-docker' } },
     );
     if (res.ok) {
       const data = (await res.json()) as { body?: string; name?: string };
       const body = data.body || '';
       const match = body.match(/Auto-built artifacts for \*\*([^*]+)\*\*/);
-      if (match && match[1]) {
+      if (match?.[1]) {
         categoryPath = match[1]; // e.g. "developer-tools/jules"
       }
     }
@@ -65,7 +65,7 @@ export async function resolveTool(input: string): Promise<ToolMeta> {
   if (!categoryPath) {
     try {
       const regRes = await fetch(
-        'https://raw.githubusercontent.com/mvanhorn/printing-press-library/main/registry.json'
+        'https://raw.githubusercontent.com/mvanhorn/printing-press-library/main/registry.json',
       );
       if (regRes.ok) {
         const regData = (await regRes.json()) as {
@@ -79,7 +79,7 @@ export async function resolveTool(input: string): Promise<ToolMeta> {
         };
 
         const found = regData.entries?.find(
-          (e) => e.name.toLowerCase() === slug || e.path?.endsWith(`/${slug}`)
+          (e) => e.name.toLowerCase() === slug || e.path?.endsWith(`/${slug}`),
         );
 
         if (found) {
@@ -96,7 +96,7 @@ export async function resolveTool(input: string): Promise<ToolMeta> {
 
   if (!categoryPath) {
     throw new Error(
-      `Could not resolve tool '${slug}' in printing-press-library catalog. Please verify the tool name.`
+      `Could not resolve tool '${slug}' in printing-press-library catalog. Please verify the tool name.`,
     );
   }
 

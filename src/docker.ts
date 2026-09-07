@@ -1,5 +1,5 @@
 import { execa } from 'execa';
-import { ToolMeta } from './types.js';
+import type { ToolMeta } from './types.js';
 
 /**
  * Checks if the Docker daemon is accessible.
@@ -37,10 +37,7 @@ CMD ["--transport", "stdio"]
 /**
  * Builds the container image using stdin Dockerfile.
  */
-export async function buildContainerImage(
-  meta: ToolMeta,
-  dryRun: boolean = false
-): Promise<void> {
+export async function buildContainerImage(meta: ToolMeta, dryRun: boolean = false): Promise<void> {
   const dockerfileContent = generateDockerfile(meta);
 
   if (dryRun) {
@@ -51,9 +48,7 @@ export async function buildContainerImage(
 
   const isAvailable = await verifyDockerAvailable();
   if (!isAvailable) {
-    throw new Error(
-      'Docker daemon is not running. Please launch Docker Desktop and try again.'
-    );
+    throw new Error('Docker daemon is not running. Please launch Docker Desktop and try again.');
   }
 
   console.log(`==> Building container image '${meta.imageTag}'...`);

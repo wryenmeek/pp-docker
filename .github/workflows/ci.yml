@@ -7,26 +7,35 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  validate:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [20.x, 22.x]
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: ${{ matrix.node-version }}
-          cache: 'npm'
+          bun-version: latest
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install
 
-      - name: Run test suite
-        run: npm test
+      - name: 1. Biome Check (Format & Lint)
+        run: bun run check
 
-      - name: Build TypeScript
-        run: npm run build
+      - name: 2. TypeScript Typecheck
+        run: bun run typecheck
+
+      - name: 3. Knip (Dead Code & Dependency Hygiene)
+        run: bun run knip
+
+      - name: 4. Bun Test & Code Coverage
+        run: |
+          echo "### 📊 Test Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          bun run test:coverage | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: 5. Build Distribution
+        run: bun run build

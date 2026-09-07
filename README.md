@@ -108,24 +108,35 @@ If a tool requires an API token (e.g. `JULES_API_KEY`):
 
 ## Development & Contributing
 
-Clone the repository and install dependencies:
+Clone the repository and install dependencies with [Bun](https://bun.sh):
 
 ```bash
 git clone https://github.com/wryenmeek/pp-docker.git
 cd pp-docker
-npm install
+bun install
 ```
 
-### Run Tests:
+### Quality & CI Commands:
 
 ```bash
-npm test
-```
+# Run full CI suite (Biome + Typecheck + Knip + Tests with Coverage)
+bun run ci
 
-### Build TypeScript:
+# Run tests and generate coverage report
+bun run test:coverage
 
-```bash
-npm run build
+# Lint and format with Biome
+bun run check
+bun run check:fix
+
+# Typecheck with TypeScript
+bun run typecheck
+
+# Audit for dead code and unused dependencies with Knip
+bun run knip
+
+# Build TypeScript distribution
+bun run build
 ```
 
 ---

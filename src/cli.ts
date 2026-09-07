@@ -2,23 +2,24 @@
 
 import { Command } from 'commander';
 import { execa } from 'execa';
-import { resolveTool } from './resolver.js';
 import { buildContainerImage } from './docker.js';
 import { registerServer } from './registrar.js';
+import { resolveTool } from './resolver.js';
 import { discoverInstalledTools } from './syncer.js';
+import type { CliOptions } from './types.js';
 
 const program = new Command();
 
 program
   .name('pp-docker')
   .description(
-    'Auto-containerize and register printing-press-library MCP servers into Docker Desktop'
+    'Auto-containerize and register printing-press-library MCP servers into Docker Desktop',
   )
   .version('0.1.0')
   .option(
     '-p, --profile <name>',
     'Target Docker MCP profile name',
-    process.env.MCP_PROFILE || 'printing-press'
+    process.env.MCP_PROFILE || 'printing-press',
   )
   .option('--dry-run', 'Preview actions without building or modifying Docker', false)
   .option('--no-build', 'Skip building the Docker image, only register the YAML spec', false);
@@ -26,11 +27,7 @@ program
 /**
  * Helper to process a single tool/URL
  */
-async function processTool(
-  input: string,
-  profile: string,
-  options: { dryRun?: boolean; noBuild?: boolean }
-) {
+async function processTool(input: string, profile: string, options: CliOptions) {
   console.log(`\n======================================================`);
   console.log(`==> Processing: ${input}`);
   console.log(`======================================================`);
@@ -46,17 +43,18 @@ async function processTool(
       console.log(`==> Skipping Docker build (--no-build specified).`);
     }
 
-    const { yamlPath } = await registerServer(meta, profile, options.dryRun);
+    await registerServer(meta, profile, options.dryRun);
 
     console.log(`\n🎉 Successfully registered '${meta.slug}-pp-mcp' into profile '${profile}'!`);
     if (meta.requiresAuth) {
       console.log(`👉 Secret required: ${meta.envKey}`);
       console.log(
-        `   Set it in Docker Desktop or run: docker mcp secret set ${meta.slug}-pp-mcp.api_key="<YOUR_KEY>"`
+        `   Set it in Docker Desktop or run: docker mcp secret set ${meta.slug}-pp-mcp.api_key="<YOUR_KEY>"`,
       );
     }
-  } catch (err: any) {
-    console.error(`❌ Error processing '${input}': ${err.message}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`❌ Error processing '${input}': ${msg}`);
   }
 }
 
@@ -78,8 +76,9 @@ program
           await execa('npx', ['-y', '@mvanhorn/printing-press-library', 'install', tool], {
             stdio: 'inherit',
           });
-        } catch (err: any) {
-          console.warn(`⚠️ Upstream installer warning for '${tool}': ${err.message}`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`⚠️ Upstream installer warning for '${tool}': ${msg}`);
         }
       }
 
@@ -91,7 +90,9 @@ program
 // 2. Command: register
 program
   .command('register')
-  .description('Register a tool or release URL directly to Docker MCP without installing native CLI')
+  .description(
+    'Register a tool or release URL directly to Docker MCP without installing native CLI',
+  )
   .argument('<tools...>', 'One or more tool names, tags, or release URLs')
   .action(async (tools: string[]) => {
     const opts = program.opts();
