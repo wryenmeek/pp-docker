@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { createServerSpec, registerServer } from '../src/registrar.js';
-import type { ToolMeta } from '../src/types.js';
+import { createServerSpec, registerServer } from '#registrar.js';
+import type { ToolMeta } from '#types.js';
 
 describe('createServerSpec', () => {
   const dummyMeta: ToolMeta = {

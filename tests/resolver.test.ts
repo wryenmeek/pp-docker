@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { normalizeSlug, resolveTool } from '../src/resolver.js';
+import { normalizeSlug, resolveTool } from '#resolver.js';
 
 describe('normalizeSlug', () => {
   it('handles full GitHub release URLs', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { buildContainerImage, generateDockerfile, verifyDockerAvailable } from '../src/docker.js';
-import type { ToolMeta } from '../src/types.js';
+import { buildContainerImage, generateDockerfile, verifyDockerAvailable } from '#docker.js';
+import type { ToolMeta } from '#types.js';
 
 describe('docker module', () => {
   const dummyMeta: ToolMeta = {

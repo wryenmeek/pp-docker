@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { discoverInstalledTools } from '../src/syncer.js';
+import { discoverInstalledTools } from '#syncer.js';
 
 describe('syncer module', () => {
   it('discovers installed tools or returns empty array gracefully', async () => {
