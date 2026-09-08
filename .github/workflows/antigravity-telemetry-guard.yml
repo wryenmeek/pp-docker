@@ -1,0 +1,37 @@
+name: Antigravity Telemetry Pre-Merge Guard
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [ opened, synchronize, reopened, ready_for_review ]
+  issue_comment:
+    types: [ created, edited ]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  verify-telemetry-receipts:
+    name: Verify Antigravity Session Telemetry
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && github.event.issue.pull_request)
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Execute Antigravity Telemetry Guard
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUM="${{ github.event.pull_request.number || github.event.issue.number }}"
+          echo "Verifying Antigravity token telemetry receipt for PR #${PR_NUM}..."
+          python3 .github/scripts/verify-pr-telemetry.py --pr "${PR_NUM}"
