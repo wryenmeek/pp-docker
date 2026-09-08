@@ -5,3 +5,6 @@ coverage/
 .DS_Store
 .env
 .infigraph/
+.agents/
+ORIGINAL_REQUEST.md
+.local/

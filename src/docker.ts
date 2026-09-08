@@ -1,12 +1,12 @@
 import { execa } from 'execa';
-import type { ToolMeta } from './types.js';
+import type { CommandExecutor, ToolMeta } from '#types.js';
 
 /**
  * Checks if the Docker daemon is accessible.
  */
-export async function verifyDockerAvailable(): Promise<boolean> {
+export async function verifyDockerAvailable(executor: CommandExecutor = execa): Promise<boolean> {
   try {
-    await execa('docker', ['info', '--format', '{{.ServerVersion}}']);
+    await executor('docker', ['info', '--format', '{{.ServerVersion}}']);
     return true;
   } catch {
     return false;
@@ -37,7 +37,11 @@ CMD ["--transport", "stdio"]
 /**
  * Builds the container image using stdin Dockerfile.
  */
-export async function buildContainerImage(meta: ToolMeta, dryRun: boolean = false): Promise<void> {
+export async function buildContainerImage(
+  meta: ToolMeta,
+  dryRun: boolean = false,
+  executor: CommandExecutor = execa,
+): Promise<void> {
   const dockerfileContent = generateDockerfile(meta);
 
   if (dryRun) {
@@ -46,14 +50,14 @@ export async function buildContainerImage(meta: ToolMeta, dryRun: boolean = fals
     return;
   }
 
-  const isAvailable = await verifyDockerAvailable();
+  const isAvailable = await verifyDockerAvailable(executor);
   if (!isAvailable) {
     throw new Error('Docker daemon is not running. Please launch Docker Desktop and try again.');
   }
 
   console.log(`==> Building container image '${meta.imageTag}'...`);
 
-  const buildProcess = execa('docker', ['build', '-t', meta.imageTag, '-'], {
+  const buildProcess = executor('docker', ['build', '-t', meta.imageTag, '-'], {
     input: dockerfileContent,
   });
 

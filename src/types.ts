@@ -38,3 +38,12 @@ export interface CliOptions {
   dryRun?: boolean;
   noBuild?: boolean;
 }
+
+/**
+ * Command executor function type abstraction compatible with execa.
+ */
+export type CommandExecutor = (
+  file: string,
+  args?: readonly string[],
+  options?: any,
+) => Promise<any> | any;
