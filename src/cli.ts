@@ -2,8 +2,8 @@
 
 import { Command } from 'commander';
 import { execa } from 'execa';
-import { buildContainerImage } from './docker.js';
-import { registerServer } from './registrar.js';
+import { buildContainerImage, verifyDockerAvailable } from './docker.js';
+import { ensureProfileExists, registerServer } from './registrar.js';
 import { resolveTool } from './resolver.js';
 import { discoverInstalledTools } from './syncer.js';
 import type { CliOptions } from './types.js';
@@ -23,6 +23,19 @@ program
   )
   .option('--dry-run', 'Preview actions without building or modifying Docker', false)
   .option('--no-build', 'Skip building the Docker image, only register the YAML spec', false);
+
+/**
+ * Pre-flight check to verify Docker availability unless dry-run.
+ */
+async function checkDockerPreflight(dryRun: boolean): Promise<boolean> {
+  if (dryRun) return true;
+  const isAvailable = await verifyDockerAvailable();
+  if (!isAvailable) {
+    console.error('❌ Docker daemon is not running. Please launch Docker Desktop and try again.');
+    return false;
+  }
+  return true;
+}
 
 /**
  * Helper to process a single tool/URL
@@ -68,6 +81,10 @@ program
     const opts = program.opts();
     const profile = opts.profile;
 
+    if (!opts.noBuild && !(await checkDockerPreflight(opts.dryRun))) {
+      process.exit(1);
+    }
+
     for (const tool of tools) {
       // 1. Run upstream installer if not disabled
       if (cmdOptions.npm && !opts.dryRun) {
@@ -98,6 +115,10 @@ program
     const opts = program.opts();
     const profile = opts.profile;
 
+    if (!opts.noBuild && !(await checkDockerPreflight(opts.dryRun))) {
+      process.exit(1);
+    }
+
     for (const tool of tools) {
       await processTool(tool, profile, opts);
     }
@@ -118,6 +139,14 @@ program
       console.log('No printing-press tools detected in ~/.local/bin or via npm.');
       console.log('Install one using: pp-docker install <tool>');
       return;
+    }
+
+    if (!opts.noBuild && !(await checkDockerPreflight(opts.dryRun))) {
+      process.exit(1);
+    }
+
+    if (!opts.dryRun) {
+      await ensureProfileExists(profile);
     }
 
     console.log(`Found ${installed.length} tool(s): ${installed.join(', ')}`);

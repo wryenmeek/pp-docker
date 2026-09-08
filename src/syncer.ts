@@ -26,13 +26,11 @@ export async function discoverInstalledTools(): Promise<string[]> {
 
   // 2. Query npx printing-press-library list --installed --json if available
   try {
-    const { stdout } = await execa('npx', [
-      '-y',
-      '@mvanhorn/printing-press-library',
-      'list',
-      '--installed',
-      '--json',
-    ]);
+    const { stdout } = await execa(
+      'npx',
+      ['-y', '@mvanhorn/printing-press-library', 'list', '--installed', '--json'],
+      { timeout: 2000 },
+    );
     const parsed = JSON.parse(stdout);
     if (Array.isArray(parsed)) {
       for (const item of parsed) {

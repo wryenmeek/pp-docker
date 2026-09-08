@@ -17,7 +17,7 @@ export async function verifyDockerAvailable(): Promise<boolean> {
  * Generates the Dockerfile content for an on-demand MCP server.
  */
 export function generateDockerfile(meta: ToolMeta): string {
-  return `FROM golang:1.24-alpine AS builder
+  return `FROM golang:alpine AS builder
 WORKDIR /src
 RUN apk add --no-cache git
 RUN go install ${meta.packagePath}@latest

@@ -17,7 +17,7 @@ describe('docker module', () => {
 
   it('generates a valid multi-stage Dockerfile', () => {
     const dockerfile = generateDockerfile(dummyMeta);
-    expect(dockerfile).toContain('FROM golang:1.24-alpine AS builder');
+    expect(dockerfile).toContain('FROM golang:alpine AS builder');
     expect(dockerfile).toContain(`go install ${dummyMeta.packagePath}@latest`);
     expect(dockerfile).toContain(
       `COPY --from=builder /go/bin/${dummyMeta.slug}-pp-mcp /usr/local/bin/mcp-server`,
