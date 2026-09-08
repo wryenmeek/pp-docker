@@ -33,5 +33,22 @@ This project is indexed by Infigraph. Use Infigraph tools FIRST for all code tas
 - "Later" does not exist — context compaction or session end can happen at any moment.
 - Same-day saves merge: summary/pending_tasks overwrite, decisions append, files_touched union
 - **Narrative dumps:** On every `save_session`, include `narrative` field with full session story — what was explored, found, reasoned, decided, and why. Chronological prose, not terse bullets. Written to `.infigraph/sessions/session_YYYY-MM-DD.md` and embedded for semantic search. On session start, if `get_latest_session` shows a narrative log path, read it when structured fields aren't enough context.
-
 <!-- infigraph-instructions -->
+
+---
+
+# Project Guidelines — pp-docker
+
+## 1. Quality & CI Stack
+- **Linting & Formatting:** Biome (`bun run check` or `bun run check:fix`).
+- **Type Checking:** TypeScript strict mode (`bun run typecheck`).
+- **Dead Code & Hygiene:** Knip (`bun run knip`).
+- **Testing & Coverage:** Bun Test (`bun run test:coverage`).
+- **All-in-one Gate:** Always run `bun run ci` before committing.
+
+## 2. Architectural & Code Constraints
+- **Subpath Imports:** Always use package subpath imports (`#module.js` mapped to `./src/*` in `package.json`). Never use relative `../src/` imports in tests to comply with Infigraph `[SEC040] Path Traversal` checks.
+- **Go Container Builder:** Multi-stage Dockerfiles must use `golang:alpine` (`go 1.27+`). Pinned older versions (e.g. `golang:1.24-alpine`) fail because upstream `printing-press-library` packages require `go >= 1.26.5` with `GOTOOLCHAIN=local`.
+- **Docker MCP Catalogs:** Server YAML specs must be written to `~/.docker/mcp/catalogs/<slug>-pp-mcp.yaml`. Docker MCP Toolkit's `--server file://...` flag only resolves specs located under `~/.docker/mcp/catalogs/`.
+- **Pre-flight Checks:** Always verify external daemons (e.g. `verifyDockerAvailable()`) upfront before iterating through tool operations to fail fast with actionable guidance.
+- **Network Call Timeouts:** Wrap external CLI/network queries (e.g. `npx`) with explicit execution timeouts (`{ timeout: 2000 }`) to prevent network hangs during tests and scans.
