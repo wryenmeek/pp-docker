@@ -31,10 +31,21 @@ export interface DockerMcpServerSpec {
 }
 
 /**
+ * Generic process execution interface compatible with execa.
+ */
+export type CommandExecutor = (
+  file: string,
+  args?: readonly string[],
+  options?: any,
+) => Promise<any> | any;
+
+/**
  * Global CLI options.
  */
 export interface CliOptions {
   profile?: string;
   dryRun?: boolean;
   noBuild?: boolean;
+  json?: boolean;
+  startDocker?: boolean;
 }
