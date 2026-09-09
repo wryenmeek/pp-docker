@@ -5,6 +5,9 @@ coverage/
 .DS_Store
 .env
 .infigraph/
+__pycache__/
+*.pyc
 .agents/
-ORIGINAL_REQUEST.md
 .local/
+ORIGINAL_REQUEST.md
+
