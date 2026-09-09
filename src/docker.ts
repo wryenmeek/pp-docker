@@ -65,3 +65,63 @@ export async function buildContainerImage(
   await buildProcess;
   console.log(`✅ Built image '${meta.imageTag}' successfully.`);
 }
+
+/**
+ * Starts Docker Desktop depending on host operating system.
+ */
+export async function startDockerDesktop(
+  executor: CommandExecutor = execa,
+  platform: NodeJS.Platform = process.platform,
+): Promise<void> {
+  if (platform === 'darwin') {
+    await executor('open', ['-a', 'Docker']);
+  } else if (platform === 'win32') {
+    await executor('cmd', ['/c', 'start', '', 'Docker Desktop']);
+  } else if (platform === 'linux') {
+    try {
+      await executor('systemctl', ['--user', 'start', 'docker-desktop']);
+    } catch {
+      await executor('sudo', ['systemctl', 'start', 'docker']);
+    }
+  } else {
+    throw new Error(`Unsupported platform for Docker auto-start: ${platform}`);
+  }
+}
+
+export interface WaitForDockerOptions {
+  timeoutMs?: number;
+  intervalMs?: number;
+  executor?: CommandExecutor;
+  onTick?: (elapsedSeconds: number, maxSeconds: number) => void;
+}
+
+/**
+ * Polls verifyDockerAvailable at intervalMs until available or timeoutMs elapsed.
+ */
+export async function waitForDockerReady(options: WaitForDockerOptions = {}): Promise<boolean> {
+  const timeoutMs = options.timeoutMs ?? 60_000;
+  const intervalMs = options.intervalMs ?? 2_000;
+  const executor = options.executor;
+  const startTime = Date.now();
+  const maxSeconds = Math.round(timeoutMs / 1000);
+
+  if (await verifyDockerAvailable(executor)) {
+    return true;
+  }
+
+  while (Date.now() - startTime < timeoutMs) {
+    const elapsedSeconds = Math.round((Date.now() - startTime) / 1000);
+    options.onTick?.(elapsedSeconds, maxSeconds);
+
+    const remainingMs = timeoutMs - (Date.now() - startTime);
+    if (remainingMs <= 0) break;
+    const waitMs = Math.min(intervalMs, remainingMs);
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+
+    if (await verifyDockerAvailable(executor)) {
+      return true;
+    }
+  }
+
+  return false;
+}
