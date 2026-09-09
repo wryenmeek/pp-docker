@@ -7,4 +7,7 @@ coverage/
 .infigraph/
 __pycache__/
 *.pyc
+.agents/
+.local/
+ORIGINAL_REQUEST.md
 
