@@ -46,7 +46,12 @@ Normally, running dozens of Model Context Protocol (MCP) servers across multiple
 1. **Docker Desktop** (v4.38+) with **MCP Toolkit / Profiles** enabled:
    * Open **Docker Desktop Settings** > **Features in development** > check **MCP Toolkit** (or run `docker mcp feature enable profiles`).
    * Verify Docker is running: `docker info`
-2. **Node.js** >= 20 or **Bun** >= 1.2 installed.
+2. **Runtime Requirements**:
+   * **For CLI users**: **Node.js** >= 20 or **Bun** >= 1.2.
+   * **For development & tests**: **Bun** >= 1.2 is required (`bun test`, `bun run preflight`, `bun run ci`).
+3. **Optional Companion Tools**:
+   * **1Password CLI (`op`)**: Optional, for piping secrets directly from 1Password vaults into Docker Desktop's keystore.
+   * **`antigravity-telemetry`**: Optional companion for deterministic session spend telemetry and branch pruning.
 
 ---
 
@@ -97,12 +102,16 @@ Options:
   -p, --profile <name>  Target Docker MCP profile name (default: "printing-press" or $MCP_PROFILE)
   --dry-run             Preview actions without building or modifying Docker (default: false)
   --no-build            Skip building the Docker image, only register the YAML spec (default: false)
+  --start-docker        Automatically launch Docker Desktop if not running (default: false)
+  --verify              Validate secrets in keystore and verify container handshake (default: false)
+  --json                Emit structured, machine-parseable JSON on stdout (default: false)
   -h, --help            display help for command
 
 Commands:
   install [options] <tools...>  Install tool(s) via printing-press-library and register into Docker MCP
-  register <tools...>           Register a tool or release URL directly to Docker MCP without installing native CLI
-  sync                          Scan all installed printing-press CLIs and register missing ones into Docker MCP
+  register [options] <tools...> Register a tool or release URL directly to Docker MCP without installing native CLI
+  sync [options]                Scan all installed printing-press CLIs and register missing ones into Docker MCP
+  verify [options] <tools...>   Validate credential presence in Docker keystore and verify MCP container handshake
 ```
 
 ### Examples:
@@ -112,10 +121,19 @@ Commands:
   pp-docker sync --dry-run
   ```
 
-* **Register into an existing profile (e.g. `default` or `dev`):**
+* **Register into an existing profile with automatic verification:**
   ```bash
-  pp-docker sync -p default
-  pp-docker install jules -p dev
+  pp-docker register jules -p default --verify
+  ```
+
+* **Verify credentials and container health across tools:**
+  ```bash
+  pp-docker verify figma flow jules
+  ```
+
+* **Emit machine-readable JSON in CI/agent scripts:**
+  ```bash
+  pp-docker verify flow --json
   ```
 
 * **Register directly from a specific GitHub Release URL:**
@@ -143,20 +161,54 @@ docker mcp client ls
 
 ---
 
-## 🔐 Managing API Keys
+## 🔐 Managing API Keys & Credentials
 
-If a tool requires an API token (e.g. `JULES_API_KEY`, `FIGMA_API_KEY`, `SLACK_API_KEY`):
+`pp-docker` automatically resolves the exact credentials required by each server from the `printing-press-library` registry:
+* **Zero Auth Tools** (e.g. `flow`, `espn`): No secrets required. Docker Desktop immediately runs them on-demand.
+* **Single Credential Tools** (e.g. `jules`): Requires `JULES_API_KEY` (`jules-pp-mcp.api_key`).
+* **Format Alternative Tools** (e.g. `figma`): Dynamically resolves the primary token `FIGMA_ACCESS_TOKEN` (`figma-pp-mcp.access_token`).
+* **Multi-Credential Tools** (e.g. `slack`): Requires distinct tokens `SLACK_BOT_TOKEN` (`slack-pp-mcp.bot_token`) and `SLACK_USER_TOKEN` (`slack-pp-mcp.user_token`).
 
-### Option A: Via Docker CLI
+### Setting Secrets in Docker Desktop
+
+#### Option A: Direct Docker CLI
 ```bash
 docker mcp secret set jules-pp-mcp.api_key="your-api-key-here"
+docker mcp secret set figma-pp-mcp.access_token="your-figma-token-here"
 ```
 
-### Option B: Via Docker Desktop GUI
+#### Option B: 1Password CLI (`op`) Integration
+If you store API keys in 1Password, securely inject them into Docker's keystore without exposing secrets in your shell history:
+```bash
+op read "op://vault/figma/access-token" | docker mcp secret set figma-pp-mcp.access_token
+op read "op://vault/slack/bot-token" | docker mcp secret set slack-pp-mcp.bot_token
+```
+
+#### Option C: Docker Desktop GUI
 1. Open **Docker Desktop**.
 2. Click **MCP Toolkit** in the sidebar.
 3. Select your profile (e.g. `printing-press`).
 4. Click on the server entry and paste your credentials.
+
+---
+
+## 🔍 Verification & Healthchecks
+
+Validate that secrets are configured in Docker's keystore and that the container responds to standard MCP JSON-RPC protocol handshakes:
+
+```bash
+# Standalone verification
+pp-docker verify jules flow figma
+
+# Automatic post-registration verification
+pp-docker register jules --verify
+```
+
+Output example:
+```text
+✔ Keystore: All 1 required secret(s) configured
+✔ Container: Handshake succeeded (40 tools available)
+```
 
 ---
 
