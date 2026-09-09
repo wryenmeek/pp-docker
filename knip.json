@@ -3,5 +3,5 @@
   "entry": ["tests/**/*.test.ts!"],
   "project": ["src/**/*.ts!", "tests/**/*.test.ts!"],
   "ignoreDependencies": ["@biomejs/*"],
-  "ignoreBinaries": ["tsc", "biome", "knip"]
+  "ignoreBinaries": ["antigravity-telemetry"]
 }
