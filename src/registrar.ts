@@ -19,14 +19,8 @@ export function createServerSpec(meta: ToolMeta): DockerMcpServerSpec {
     volumes: [`${meta.slug}-data:/data`],
   };
 
-  if (meta.requiresAuth) {
-    spec.secrets = [
-      {
-        name: `${meta.slug}-pp-mcp.api_key`,
-        env: meta.envKey,
-        example: `your_${meta.slug}_api_key`,
-      },
-    ];
+  if (meta.secrets.length > 0) {
+    spec.secrets = meta.secrets.map((s) => ({ name: s.name, env: s.env, example: s.example }));
   }
 
   return spec;

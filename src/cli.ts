@@ -227,10 +227,14 @@ export async function processTool(
 
     if (!options.json) {
       console.log(`\n🎉 Successfully registered '${meta.slug}-pp-mcp' into profile '${profile}'!`);
-      if (meta.requiresAuth) {
-        console.log(`👉 Secret required: ${meta.envKey}`);
+      if (meta.secrets.length > 0) {
+        console.log(`👉 ${meta.secrets.length} secret(s) required:`);
+        for (const secret of meta.secrets) {
+          console.log(`   • ${secret.env}`);
+          console.log(`     Set it: docker mcp secret set ${secret.name}="<YOUR_VALUE>"`);
+        }
         console.log(
-          `   Set it in Docker Desktop or run: docker mcp secret set ${meta.slug}-pp-mcp.api_key="<YOUR_KEY>"`,
+          `   💡 1Password: op read "op://vault/item/field" | docker mcp secret set <name>`,
         );
       }
     }

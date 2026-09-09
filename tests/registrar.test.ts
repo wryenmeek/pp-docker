@@ -14,9 +14,14 @@ describe('registrar module', () => {
     packagePath:
       'github.com/mvanhorn/printing-press-library/library/developer-tools/jules/cmd/jules-pp-mcp',
     imageTag: 'printing-press/jules-mcp:latest',
-    envKey: 'JULES_API_KEY',
     description: 'Jules Planning & Progress API for async coding tasks',
-    requiresAuth: true,
+    secrets: [
+      {
+        name: 'jules-pp-mcp.api_key',
+        env: 'JULES_API_KEY',
+        example: 'your_jules_api_key',
+      },
+    ],
   };
 
   describe('createServerSpec', () => {
@@ -37,15 +42,41 @@ describe('registrar module', () => {
       });
     });
 
-    it('omits secrets when authentication is not required', () => {
+    it('omits secrets when secrets array is empty', () => {
       const unauthMeta: ToolMeta = {
         ...dummyMeta,
         slug: 'espn',
-        requiresAuth: false,
+        secrets: [],
       };
 
       const spec = createServerSpec(unauthMeta);
       expect(spec.secrets).toBeUndefined();
+    });
+
+    it('generates multi-secret spec for tools with multiple credentials', () => {
+      const slackMeta: ToolMeta = {
+        ...dummyMeta,
+        slug: 'slack',
+        title: 'Slack (Printing Press)',
+        imageTag: 'printing-press/slack-mcp:latest',
+        secrets: [
+          {
+            name: 'slack-pp-mcp.bot_token',
+            env: 'SLACK_BOT_TOKEN',
+            example: 'your_slack_bot_token',
+          },
+          {
+            name: 'slack-pp-mcp.user_token',
+            env: 'SLACK_USER_TOKEN',
+            example: 'your_slack_user_token',
+          },
+        ],
+      };
+
+      const spec = createServerSpec(slackMeta);
+      expect(spec.secrets).toHaveLength(2);
+      expect(spec.secrets?.[0].env).toBe('SLACK_BOT_TOKEN');
+      expect(spec.secrets?.[1].env).toBe('SLACK_USER_TOKEN');
     });
   });
 

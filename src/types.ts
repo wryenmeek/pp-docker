@@ -1,4 +1,27 @@
 /**
+ * A single secret required by an MCP server container.
+ * Maps a Docker MCP secret name to the environment variable injected
+ * into the container at runtime.
+ */
+export interface SecretDefinition {
+  /** Docker MCP secret identifier, e.g. "figma-pp-mcp.access_token" */
+  name: string;
+  /** Environment variable name injected into the container, e.g. "FIGMA_ACCESS_TOKEN" */
+  env: string;
+  /** Human-readable example or placeholder value */
+  example: string;
+}
+
+/**
+ * Upstream MCP metadata from the printing-press-library registry.
+ */
+export interface McpMetadata {
+  authType: string;
+  envVars: string[];
+  toolCount?: number;
+}
+
+/**
  * Metadata for a resolved printing-press tool.
  */
 export interface ToolMeta {
@@ -7,9 +30,11 @@ export interface ToolMeta {
   category: string;
   packagePath: string;
   imageTag: string;
-  envKey: string;
   description: string;
-  requiresAuth: boolean;
+  /** Dynamic secrets derived from upstream registry env_vars. Empty array = no auth. */
+  secrets: SecretDefinition[];
+  /** Optional upstream MCP metadata for diagnostics. */
+  mcpMeta?: McpMetadata;
 }
 
 /**
@@ -23,11 +48,7 @@ export interface DockerMcpServerSpec {
   description: string;
   longLived: boolean;
   volumes?: string[];
-  secrets?: Array<{
-    name: string;
-    env: string;
-    example: string;
-  }>;
+  secrets?: SecretDefinition[];
 }
 
 /**
