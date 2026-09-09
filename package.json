@@ -30,8 +30,9 @@
     "check:fix": "biome check --write .",
     "test": "bun test",
     "test:coverage": "bun test --coverage --coverage-reporter=text",
+    "test:telemetry": "python3 -m unittest discover -s tests -p 'test_*.py'",
     "knip": "knip",
-    "ci": "biome check . && tsc --noEmit && knip && bun test --coverage",
+    "ci": "biome check . && tsc --noEmit && knip && bun test --coverage && bun run test:telemetry",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
