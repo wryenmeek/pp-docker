@@ -31,10 +31,52 @@ export interface DockerMcpServerSpec {
 }
 
 /**
+ * Generic process execution interface compatible with execa.
+ */
+export type CommandExecutor = (
+  file: string,
+  args?: readonly string[],
+  options?: any,
+) => Promise<any> | any;
+
+/**
  * Global CLI options.
  */
 export interface CliOptions {
   profile?: string;
   dryRun?: boolean;
   noBuild?: boolean;
+  json?: boolean;
+  startDocker?: boolean;
+}
+
+/**
+ * Result of processing a single tool.
+ */
+export interface CliToolResult {
+  tool: string;
+  status: 'success' | 'failed' | 'skipped';
+  imageTag?: string;
+  error?: string;
+}
+
+/**
+ * Batch execution summary.
+ */
+export interface CliSummary {
+  total: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+}
+
+/**
+ * Structured JSON payload emitted on stdout when --json is specified.
+ */
+export interface CliJsonOutput {
+  command: 'sync' | 'register' | 'install';
+  profile: string;
+  dryRun: boolean;
+  results: CliToolResult[];
+  summary: CliSummary;
 }

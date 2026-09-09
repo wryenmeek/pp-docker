@@ -42,12 +42,12 @@ This project is indexed by Infigraph. Use Infigraph tools FIRST for all code tas
 ## 1. Quality & CI Stack
 - **Linting & Formatting:** Biome (`bun run check` or `bun run check:fix`).
 - **Type Checking:** TypeScript strict mode (`bun run typecheck`).
-- **Dead Code & Hygiene:** Knip (`bun run knip`).
+- **Dead Code & Hygiene:** Knip (`bun run knip` with unlisted binary exclusion).
 - **Testing & Coverage:** Bun Test (`bun run test:coverage`).
 - **All-in-one Gate:** Always run `bun run ci` before committing.
 
 ## 2. Architectural & Code Constraints
-- **Subpath Imports:** Always use package subpath imports (`#module.js` mapped to `./src/*` in `package.json`). Never use relative `../src/` imports in tests to comply with Infigraph `[SEC040] Path Traversal` checks.
+- **Subpath Imports:** Always use package subpath imports (`#* -> ./src/*` mapped in `package.json`, e.g. `#cli.js`, `#types.js`). Never use relative `../src/` imports in tests to comply with Infigraph `[SEC040] Path Traversal` checks.
 - **Go Container Builder:** Multi-stage Dockerfiles must use `golang:alpine` (`go 1.27+`). Pinned older versions (e.g. `golang:1.24-alpine`) fail because upstream `printing-press-library` packages require `go >= 1.26.5` with `GOTOOLCHAIN=local`.
 - **Docker MCP Catalogs:** Server YAML specs must be written to `~/.docker/mcp/catalogs/<slug>-pp-mcp.yaml`. Docker MCP Toolkit's `--server file://...` flag only resolves specs located under `~/.docker/mcp/catalogs/`.
 - **Pre-flight Checks:** Always verify external daemons (e.g. `verifyDockerAvailable()`) upfront before iterating through tool operations to fail fast with actionable guidance.
