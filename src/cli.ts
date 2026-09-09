@@ -13,7 +13,14 @@ import {
 import { ensureProfileExists, registerServer } from '#registrar.js';
 import { resolveTool } from '#resolver.js';
 import { discoverInstalledTools } from '#syncer.js';
-import type { CliJsonOutput, CliOptions, CliSummary, CliToolResult } from '#types.js';
+import type {
+  CliJsonOutput,
+  CliOptions,
+  CliSummary,
+  CliToolResult,
+  ToolVerificationResult,
+} from '#types.js';
+import { verifyTool } from '#verifier.js';
 
 export async function promptUserToStartDocker(): Promise<boolean> {
   const rl = readline.createInterface({ input, output });
@@ -239,6 +246,37 @@ export async function processTool(
       }
     }
 
+    if (options.verify) {
+      if (!options.json) {
+        console.log(
+          `\n==> Verifying '${meta.slug}-pp-mcp' credential configuration and container handshake...`,
+        );
+      }
+      const vResult = await verifyTool(input, Boolean(options.dryRun));
+      if (!options.json) {
+        if (vResult.status === 'verified') {
+          const secretCount = vResult.keystore.secrets.length;
+          const secretMsg = vResult.keystore.required
+            ? `${secretCount} secret(s) configured`
+            : 'no secrets required';
+          console.log(`✔ Keystore: ${secretMsg}`);
+          console.log(
+            `✔ Container: Handshake succeeded (${vResult.runtime.toolsCount ?? 0} tools available)`,
+          );
+        } else {
+          console.error(`❌ Verification failed: ${vResult.error || 'unknown error'}`);
+        }
+      }
+      if (vResult.status === 'failed') {
+        return {
+          tool: input,
+          status: 'failed',
+          imageTag: meta.imageTag,
+          error: vResult.error,
+        };
+      }
+    }
+
     return {
       tool: input,
       status: 'success',
@@ -277,6 +315,7 @@ export function createProgram(): Command {
     .option('--dry-run', 'Preview actions without building or modifying Docker', false)
     .option('--no-build', 'Skip building the Docker image, only register the YAML spec')
     .option('--start-docker', 'Automatically launch Docker Desktop if not running', false)
+    .option('--verify', 'Validate secrets in keystore and verify container handshake', false)
     .option('--json', 'Emit structured, machine-parseable JSON on stdout', false);
 
   // 1. Command: install
@@ -286,6 +325,11 @@ export function createProgram(): Command {
     .argument('<tools...>', 'One or more tool names or release URLs')
     .option('--no-npm', 'Skip running upstream npm installer for native skill/cli', false)
     .option('--start-docker', 'Automatically launch Docker Desktop if not running', false)
+    .option(
+      '--verify',
+      'Validate secrets in keystore and verify container handshake after install',
+      false,
+    )
     .option('--json', 'Emit structured, machine-parseable JSON on stdout', false)
     .action(async (tools: string[], _cmdOpts, cmd: Command) => {
       const opts = cmd.optsWithGlobals<CliOptions & { npm?: boolean }>();
@@ -374,6 +418,11 @@ export function createProgram(): Command {
     )
     .argument('<tools...>', 'One or more tool names, tags, or release URLs')
     .option('--start-docker', 'Automatically launch Docker Desktop if not running', false)
+    .option(
+      '--verify',
+      'Validate secrets in keystore and verify container handshake after registration',
+      false,
+    )
     .option('--json', 'Emit structured, machine-parseable JSON on stdout', false)
     .action(async (tools: string[], _cmdOpts, cmd: Command) => {
       const opts = cmd.optsWithGlobals<CliOptions>();
@@ -570,6 +619,115 @@ export function createProgram(): Command {
         }
 
         const exitCode = computeExitCode(summary);
+        process.exitCode = exitCode;
+      });
+    });
+
+  // 4. Command: verify
+  program
+    .command('verify')
+    .description(
+      'Validate credential presence in Docker keystore and verify MCP container handshake',
+    )
+    .argument('<tools...>', 'One or more tool names, tags, or release URLs')
+    .option('--start-docker', 'Automatically launch Docker Desktop if not running', false)
+    .option('--json', 'Emit structured, machine-parseable JSON on stdout', false)
+    .action(async (tools: string[], _cmdOpts, cmd: Command) => {
+      const opts = cmd.optsWithGlobals<CliOptions>();
+      const profile = opts.profile || 'printing-press';
+      const isJson = Boolean(opts.json);
+
+      await withJsonSuppression(isJson, async () => {
+        if (!opts.dryRun && !(await checkDockerPreflight(opts))) {
+          if (isJson) {
+            const results: ToolVerificationResult[] = tools.map((tool) => ({
+              tool,
+              slug: tool,
+              status: 'failed',
+              keystore: { required: false, allConfigured: false, secrets: [] },
+              runtime: { imageAvailable: false, containerStarted: false },
+              error: 'Docker daemon is not running. Please launch Docker Desktop and try again.',
+            }));
+            const summary: CliSummary = {
+              total: tools.length,
+              succeeded: 0,
+              failed: tools.length,
+              skipped: 0,
+            };
+            emitJson({
+              command: 'verify',
+              profile,
+              dryRun: false,
+              results,
+              summary,
+            });
+          }
+          process.exitCode = 1;
+          return;
+        }
+
+        const results: ToolVerificationResult[] = [];
+        for (const tool of tools) {
+          if (!isJson) {
+            printBanner(tool);
+          }
+          const vResult = await verifyTool(tool, Boolean(opts.dryRun));
+          results.push(vResult);
+
+          if (!isJson) {
+            if (vResult.status === 'verified') {
+              const secretCount = vResult.keystore.secrets.length;
+              const secretMsg = vResult.keystore.required
+                ? `All ${secretCount} required secret(s) configured`
+                : 'No secrets required';
+              console.log(`✔ Keystore: ${secretMsg}`);
+              console.log(
+                `✔ Container: Handshake succeeded (${vResult.runtime.toolsCount ?? 0} tools available)`,
+              );
+            } else {
+              console.error(`❌ ${vResult.error || 'Verification failed'}`);
+              if (vResult.keystore.required && !vResult.keystore.allConfigured) {
+                const missing = vResult.keystore.secrets.filter((s) => !s.configured);
+                for (const s of missing) {
+                  console.log(`   Set it: docker mcp secret set ${s.name}="<YOUR_VALUE>"`);
+                  console.log(
+                    `   💡 1Password: op read "op://vault/item/field" | docker mcp secret set ${s.name}`,
+                  );
+                }
+              }
+            }
+          }
+        }
+
+        const summary: CliSummary = {
+          total: results.length,
+          succeeded: results.filter((r) => r.status === 'verified').length,
+          failed: results.filter((r) => r.status === 'failed').length,
+          skipped: results.filter((r) => r.status === 'warning').length,
+        };
+
+        const exitCode = computeExitCode(summary);
+
+        if (isJson) {
+          emitJson({
+            command: 'verify',
+            profile,
+            dryRun: Boolean(opts.dryRun),
+            results,
+            summary,
+          });
+        } else if (results.length > 1 || summary.failed > 0) {
+          console.log('\n--- Verification Summary ---');
+          console.log(
+            `Total: ${summary.total} | Verified: ${summary.succeeded} | Failed: ${summary.failed} | Warnings: ${summary.skipped}`,
+          );
+          for (const r of results) {
+            const icon = r.status === 'verified' ? '✔' : r.status === 'warning' ? '⚠️' : '❌';
+            const detail = r.error ? ` (${r.error})` : ` [${r.runtime.toolsCount ?? 0} tools]`;
+            console.log(`  ${icon} ${r.tool}: ${r.status}${detail}`);
+          }
+        }
+
         process.exitCode = exitCode;
       });
     });

@@ -69,6 +69,7 @@ export interface CliOptions {
   noBuild?: boolean;
   json?: boolean;
   startDocker?: boolean;
+  verify?: boolean;
 }
 
 /**
@@ -92,12 +93,45 @@ export interface CliSummary {
 }
 
 /**
+ * Status of an individual secret in the keystore.
+ */
+export interface SecretStatus {
+  name: string;
+  env: string;
+  configured: boolean;
+}
+
+/**
+ * Result of end-to-end credential and container runtime verification.
+ */
+export interface ToolVerificationResult {
+  tool: string;
+  slug: string;
+  status: 'verified' | 'failed' | 'warning';
+  keystore: {
+    required: boolean;
+    allConfigured: boolean;
+    secrets: SecretStatus[];
+  };
+  runtime: {
+    imageAvailable: boolean;
+    containerStarted: boolean;
+    protocolVersion?: string;
+    serverName?: string;
+    serverVersion?: string;
+    toolsCount?: number;
+    error?: string;
+  };
+  error?: string;
+}
+
+/**
  * Structured JSON payload emitted on stdout when --json is specified.
  */
 export interface CliJsonOutput {
-  command: 'sync' | 'register' | 'install';
+  command: 'sync' | 'register' | 'install' | 'verify';
   profile: string;
   dryRun: boolean;
-  results: CliToolResult[];
+  results: Array<CliToolResult | ToolVerificationResult>;
   summary: CliSummary;
 }

@@ -651,12 +651,14 @@ describe('Commander CLI Program Structure', () => {
     expect(options).toContain('--profile');
     expect(options).toContain('--dry-run');
     expect(options).toContain('--no-build');
+    expect(options).toContain('--verify');
     expect(options).toContain('--json');
 
     const commands = prog.commands.map((c) => c.name());
     expect(commands).toContain('install');
     expect(commands).toContain('register');
     expect(commands).toContain('sync');
+    expect(commands).toContain('verify');
   });
 });
 
@@ -756,5 +758,26 @@ describe('E2E CLI Subprocess Execution (--json, --dry-run, exit codes)', () => {
     expect(parsed.results[0].tool).toBe('jules');
     expect(parsed.results[0].status).toBe('success');
     expect(parsed.summary.succeeded).toBe(1);
-  });
+  }, 15000);
+
+  it('pp-docker verify jules --dry-run --json emits valid JSON and exits 0', async () => {
+    const result = await runCli(['verify', 'jules', '--dry-run', '--json']);
+    expect(result.exitCode).toBe(0);
+
+    const parsed: CliJsonOutput = JSON.parse(result.stdout.trim());
+    expect(parsed.command).toBe('verify');
+    expect(parsed.results[0].tool).toBe('jules');
+    expect(parsed.results[0].status).toBe('verified');
+    expect(parsed.summary.succeeded).toBe(1);
+  }, 15000);
+
+  it('pp-docker register jules --verify --dry-run --json verifies after registration', async () => {
+    const result = await runCli(['register', 'jules', '--verify', '--dry-run', '--json']);
+    expect(result.exitCode).toBe(0);
+
+    const parsed: CliJsonOutput = JSON.parse(result.stdout.trim());
+    expect(parsed.command).toBe('register');
+    expect(parsed.results[0].tool).toBe('jules');
+    expect(parsed.results[0].status).toBe('success');
+  }, 15000);
 });
