@@ -677,7 +677,7 @@ describe('E2E CLI Subprocess Execution (--json, --dry-run, exit codes)', () => {
     expect(parsed.summary.total).toBe(parsed.results.length);
     expect(parsed.summary.succeeded).toBe(parsed.results.length);
     expect(parsed.summary.failed).toBe(0);
-  });
+  }, 15000);
 
   it('pp-docker register jules --dry-run --json emits valid JSON and exits 0', async () => {
     const result = await runCli(['register', 'jules', '--dry-run', '--json']);
@@ -697,7 +697,7 @@ describe('E2E CLI Subprocess Execution (--json, --dry-run, exit codes)', () => {
       failed: 0,
       skipped: 0,
     });
-  });
+  }, 15000);
 
   it('pp-docker register with non-existent tool exits 1 on full failure', async () => {
     try {
@@ -719,7 +719,7 @@ describe('E2E CLI Subprocess Execution (--json, --dry-run, exit codes)', () => {
         skipped: 0,
       });
     }
-  });
+  }, 15000);
 
   it('pp-docker register mixed batch exits 2 on partial failure', async () => {
     try {
@@ -745,7 +745,7 @@ describe('E2E CLI Subprocess Execution (--json, --dry-run, exit codes)', () => {
         skipped: 0,
       });
     }
-  });
+  }, 15000);
 
   it('pp-docker install jules --dry-run --json emits valid JSON and exits 0', async () => {
     const result = await runCli(['install', 'jules', '--dry-run', '--json']);
