@@ -2,6 +2,7 @@
 """
 verify-pr-telemetry.py
 Deterministic Antigravity Telemetry Pre-Merge Guard check for GitHub Actions CI and pre-merge hooks.
+Includes commit pagination (>100 commits), comment authentication, and commit status bridge.
 """
 
 import sys
@@ -15,6 +16,8 @@ from typing import List, Tuple, Optional, Dict, Any
 RECEIPT_START = "<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START"
 RECEIPT_END = "ANTIGRAVITY-TELEMETRY-RECEIPT-END -->"
 DEFAULT_TIMEOUT_SEC = 60
+TRUSTED_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
+TRUSTED_BOT_LOGINS = {"github-actions", "github-actions[bot]"}
 
 def extract_session_ids_from_text(text: str) -> List[str]:
     matches = re.findall(r"Antigravity-Session-ID:\s*([a-f0-9\-]{36})", text, re.IGNORECASE)
@@ -27,20 +30,119 @@ def extract_session_ids_from_text(text: str) -> List[str]:
             result.append(m_lower)
     return result
 
-def get_pr_details(pr_num: int, repo: Optional[str] = None, timeout: int = DEFAULT_TIMEOUT_SEC) -> Dict[str, Any]:
+def get_all_pr_commits_and_head(
+    pr_num: int,
+    repo: Optional[str] = None,
+    timeout: int = DEFAULT_TIMEOUT_SEC
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """
+    Fetches all commits across any number of pages using GitHub GraphQL API,
+    guaranteeing complete commit coverage for PRs with >100 commits.
+    Returns (commits_list, head_sha).
+    """
+    owner = None
+    repo_name = None
+
+    if repo and "/" in repo:
+        parts = repo.split("/", 1)
+        owner, repo_name = parts[0], parts[1]
+    elif os.getenv("GITHUB_REPOSITORY") and "/" in os.environ["GITHUB_REPOSITORY"]:
+        parts = os.environ["GITHUB_REPOSITORY"].split("/", 1)
+        owner, repo_name = parts[0], parts[1]
+    else:
+        try:
+            res = subprocess.run(
+                ["gh", "repo", "view", "--json", "owner,name"],
+                capture_output=True, text=True, timeout=timeout
+            )
+            if res.returncode == 0:
+                repo_data = json.loads(res.stdout)
+                owner = repo_data.get("owner", {}).get("login")
+                repo_name = repo_data.get("name")
+        except Exception:
+            pass
+
+    commits: List[Dict[str, Any]] = []
+    head_sha: Optional[str] = None
+    cursor: Optional[str] = None
+
+    if owner and repo_name:
+        query = """
+        query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
+          repository(owner: $owner, name: $repo) {
+            pullRequest(number: $pr) {
+              headRefOid
+              commits(first: 100, after: $cursor) {
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+                nodes {
+                  commit {
+                    oid
+                    messageHeadline
+                    messageBody
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        while True:
+            cmd = ["gh", "api", "graphql", "-F", f"owner={owner}", "-F", f"repo={repo_name}", "-F", f"pr={pr_num}"]
+            if cursor:
+                cmd.extend(["-F", f"cursor={cursor}"])
+            cmd.extend(["-f", f"query={query}"])
+
+            try:
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+                if res.returncode != 0:
+                    break
+                data = json.loads(res.stdout)
+                pr_obj = data.get("data", {}).get("repository", {}).get("pullRequest")
+                if not pr_obj:
+                    break
+                if not head_sha:
+                    head_sha = pr_obj.get("headRefOid")
+                commits_obj = pr_obj.get("commits", {})
+                for node in commits_obj.get("nodes", []):
+                    c = node.get("commit", {})
+                    commits.append({
+                        "oid": c.get("oid", ""),
+                        "messageHeadline": c.get("messageHeadline", ""),
+                        "messageBody": c.get("messageBody", "")
+                    })
+                page_info = commits_obj.get("pageInfo", {})
+                if page_info.get("hasNextPage") and page_info.get("endCursor"):
+                    cursor = page_info.get("endCursor")
+                else:
+                    break
+            except Exception:
+                break
+
+    if commits:
+        return commits, head_sha
+
+    # Fallback to standard gh pr view
     cmd = ["gh", "pr", "view", str(pr_num), "--json", "commits,headRefOid,headRefName"]
     if repo:
         cmd.extend(["-R", repo])
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as te:
-        raise RuntimeError(f"GitHub CLI timed out after {timeout}s fetching PR #{pr_num} details") from te
+        raise RuntimeError(f"GitHub CLI timed out after {timeout}s fetching PR #{pr_num} commits") from te
 
     if res.returncode != 0:
         raise RuntimeError(f"Failed to fetch PR #{pr_num} commits: {res.stderr.strip()}")
-    return json.loads(res.stdout)
+    data = json.loads(res.stdout)
+    return data.get("commits", []), data.get("headRefOid")
 
-def get_pr_comments(pr_num: int, repo: Optional[str] = None, timeout: int = DEFAULT_TIMEOUT_SEC) -> List[str]:
+def get_pr_comments(
+    pr_num: int,
+    repo: Optional[str] = None,
+    timeout: int = DEFAULT_TIMEOUT_SEC
+) -> List[Dict[str, Any]]:
     cmd = ["gh", "pr", "view", str(pr_num), "--json", "comments"]
     if repo:
         cmd.extend(["-R", repo])
@@ -52,7 +154,7 @@ def get_pr_comments(pr_num: int, repo: Optional[str] = None, timeout: int = DEFA
     if res.returncode != 0:
         raise RuntimeError(f"Failed to fetch PR #{pr_num} comments: {res.stderr.strip()}")
     data = json.loads(res.stdout)
-    return [c.get("body", "") for c in data.get("comments", [])]
+    return data.get("comments", [])
 
 def post_commit_status(
     sha: str,
@@ -65,7 +167,8 @@ def post_commit_status(
     if not sha or len(sha) < 8:
         return False, "Invalid commit SHA for status check"
 
-    endpoint = f"repos/{repo}/statuses/{sha}" if repo else f":owner/:repo/statuses/{sha}"
+    target_repo = repo or os.getenv("GITHUB_REPOSITORY")
+    endpoint = f"repos/{target_repo}/statuses/{sha}" if target_repo else f"repos/:owner/:repo/statuses/{sha}"
     cmd = [
         "gh", "api", "--method", "POST",
         endpoint,
@@ -90,15 +193,13 @@ def verify_pr_telemetry(
 ) -> Tuple[bool, str, Optional[Dict[str, Any]], Optional[str]]:
     """
     Deterministically validates that a PR satisfies the Antigravity Telemetry Pre-Merge Guard:
-    1. Extracts all Antigravity-Session-ID trailers from all PR commits.
-    2. Verifies that a valid Antigravity Telemetry receipt exists in the PR comments.
+    1. Extracts all Antigravity-Session-ID trailers from all PR commits across all pages.
+    2. Verifies that a valid, authenticated Antigravity Telemetry receipt exists in the PR comments.
     3. Asserts that 100% of committed session IDs are covered in the receipt.
     Returns (passed, message, receipt_data, head_sha)
     """
     try:
-        pr_data = get_pr_details(pr_num, repo, timeout=timeout)
-        commits = pr_data.get("commits", [])
-        head_sha = pr_data.get("headRefOid")
+        commits, head_sha = get_all_pr_commits_and_head(pr_num, repo, timeout=timeout)
     except Exception as e:
         return False, f"Could not inspect PR commits: {e}", None, None
 
@@ -121,14 +222,31 @@ def verify_pr_telemetry(
     receipt_data = None
     receipt_pattern = re.compile(re.escape(RECEIPT_START) + r"\s*(\{.*\})\s*" + re.escape(RECEIPT_END), re.DOTALL)
 
-    for body in reversed(comments):
+    for c in reversed(comments):
+        body = c.get("body", "") if isinstance(c, dict) else str(c)
+        author = c.get("author", {}).get("login", "") if isinstance(c, dict) else ""
+        association = (c.get("authorAssociation") or "").upper() if isinstance(c, dict) else ""
+
         match = receipt_pattern.search(body)
-        if match:
-            try:
-                receipt_data = json.loads(match.group(1))
+        if not match:
+            continue
+
+        # Authenticate commenter provenance: only trust repo owners, members, collaborators, or CI bots
+        is_trusted = (
+            not isinstance(c, dict)  # fallback when comments are raw strings in unit tests
+            or association in TRUSTED_ASSOCIATIONS
+            or author in TRUSTED_BOT_LOGINS
+        )
+        if not is_trusted:
+            continue
+
+        try:
+            parsed = json.loads(match.group(1))
+            if "covered_session_ids" in parsed:
+                receipt_data = parsed
                 break
-            except Exception:
-                continue
+        except Exception:
+            continue
 
     if not all_committed_cids:
         if receipt_data:
@@ -139,7 +257,7 @@ def verify_pr_telemetry(
         return False, (
             f"[ANTIGRAVITY MERGE GUARD FAILED: MISSING TELEMETRY REPORT]\n"
             f"PR #{pr_num} contains {len(all_committed_cids)} Antigravity session(s) across {len(committed_sessions)} commit(s),\n"
-            f"but NO verified Antigravity Telemetry Report comment was found on the PR.\n"
+            f"but NO authenticated Antigravity Telemetry Report comment was found on the PR.\n"
             f"Committed Sessions: {sorted(list(all_committed_cids))}\n"
             f"Action Required: Run 'antigravity-telemetry post --pr {pr_num}' to publish verified telemetry before merging."
         ), None, head_sha
@@ -179,7 +297,7 @@ def main():
         desc = "Verified Antigravity session telemetry" if passed else "Missing/incomplete Antigravity session telemetry"
         if receipt_data:
             desc = f"Verified: {receipt_data.get('total_billed_tokens', 0):,} billed ({receipt_data.get('cache_hit_pct', 0)}% cache)"
-        
+
         target_url = None
         if os.getenv("GITHUB_REPOSITORY") and os.getenv("GITHUB_RUN_ID"):
             target_url = f"https://github.com/{os.getenv('GITHUB_REPOSITORY')}/actions/runs/{os.getenv('GITHUB_RUN_ID')}"

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
 tests/test_verify_pr_telemetry.py
-Unit tests for .github/scripts/verify-pr-telemetry.py edge cases and error handling.
+Unit tests for .github/scripts/verify-pr-telemetry.py edge cases, pagination, authentication, and error handling.
 """
 
 import sys
 import os
+import json
 import unittest
 from unittest.mock import patch, MagicMock
 import subprocess
@@ -47,36 +48,35 @@ class TestVerifyPrTelemetry(unittest.TestCase):
         # No session IDs
         self.assertEqual(vpr.extract_session_ids_from_text("regular commit message"), [])
 
-    @patch.object(vpr, "get_pr_details")
+    @patch.object(vpr, "get_all_pr_commits_and_head")
     @patch.object(vpr, "get_pr_comments")
-    def test_no_antigravity_commits_passes(self, mock_comments, mock_details):
-        mock_details.return_value = {
-            "headRefOid": "abc12345678",
-            "commits": [
-                {"oid": "abc12345", "messageHeadline": "human commit", "messageBody": "no session trailer"}
-            ]
-        }
-        mock_comments.return_value = ["regular comment"]
+    def test_no_antigravity_commits_passes(self, mock_comments, mock_commits):
+        mock_commits.return_value = (
+            [{"oid": "abc12345", "messageHeadline": "human commit", "messageBody": "no session trailer"}],
+            "abc12345678"
+        )
+        mock_comments.return_value = [{"body": "regular comment", "authorAssociation": "OWNER"}]
 
         passed, msg, receipt, head_sha = vpr.verify_pr_telemetry(99)
         self.assertTrue(passed)
         self.assertIn("No Antigravity session commits detected", msg)
         self.assertEqual(head_sha, "abc12345678")
 
-    @patch.object(vpr, "get_pr_details")
+    @patch.object(vpr, "get_all_pr_commits_and_head")
     @patch.object(vpr, "get_pr_comments")
-    def test_missing_telemetry_receipt_fails(self, mock_comments, mock_details):
-        mock_details.return_value = {
-            "headRefOid": "abc12345678",
-            "commits": [
-                {
-                    "oid": "abc12345",
-                    "messageHeadline": "feat: ai change",
-                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
-                }
-            ]
-        }
-        mock_comments.return_value = ["looks good to me", "test comment"]
+    def test_missing_telemetry_receipt_fails(self, mock_comments, mock_commits):
+        mock_commits.return_value = (
+            [{
+                "oid": "abc12345",
+                "messageHeadline": "feat: ai change",
+                "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
+            }],
+            "abc12345678"
+        )
+        mock_comments.return_value = [
+            {"body": "looks good to me", "authorAssociation": "CONTRIBUTOR"},
+            {"body": "test comment", "authorAssociation": "MEMBER"}
+        ]
 
         passed, msg, receipt, head_sha = vpr.verify_pr_telemetry(99)
         self.assertFalse(passed)
@@ -84,12 +84,11 @@ class TestVerifyPrTelemetry(unittest.TestCase):
         self.assertIn("53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b", msg)
         self.assertIsNone(receipt)
 
-    @patch.object(vpr, "get_pr_details")
+    @patch.object(vpr, "get_all_pr_commits_and_head")
     @patch.object(vpr, "get_pr_comments")
-    def test_incomplete_sessions_fails(self, mock_comments, mock_details):
-        mock_details.return_value = {
-            "headRefOid": "abc12345678",
-            "commits": [
+    def test_incomplete_sessions_fails(self, mock_comments, mock_commits):
+        mock_commits.return_value = (
+            [
                 {
                     "oid": "11111111",
                     "messageHeadline": "commit 1",
@@ -100,9 +99,9 @@ class TestVerifyPrTelemetry(unittest.TestCase):
                     "messageHeadline": "commit 2",
                     "messageBody": "Antigravity-Session-ID: eeee4444-5555-6666-7777-888899990000"
                 }
-            ]
-        }
-        # Receipt only covers session 1
+            ],
+            "abc12345678"
+        )
         receipt_json = (
             '<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n'
             '{\n'
@@ -112,26 +111,24 @@ class TestVerifyPrTelemetry(unittest.TestCase):
             '}\n'
             'ANTIGRAVITY-TELEMETRY-RECEIPT-END -->'
         )
-        mock_comments.return_value = [receipt_json]
+        mock_comments.return_value = [{"body": receipt_json, "authorAssociation": "OWNER"}]
 
         passed, msg, receipt, head_sha = vpr.verify_pr_telemetry(99)
         self.assertFalse(passed)
         self.assertIn("INCOMPLETE SESSION PROVENANCE", msg)
         self.assertIn("eeee4444-5555-6666-7777-888899990000", msg)
 
-    @patch.object(vpr, "get_pr_details")
+    @patch.object(vpr, "get_all_pr_commits_and_head")
     @patch.object(vpr, "get_pr_comments")
-    def test_all_sessions_covered_passes(self, mock_comments, mock_details):
-        mock_details.return_value = {
-            "headRefOid": "abc12345678",
-            "commits": [
-                {
-                    "oid": "11111111",
-                    "messageHeadline": "commit 1",
-                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
-                }
-            ]
-        }
+    def test_all_sessions_covered_passes(self, mock_comments, mock_commits):
+        mock_commits.return_value = (
+            [{
+                "oid": "11111111",
+                "messageHeadline": "commit 1",
+                "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
+            }],
+            "abc12345678"
+        )
         receipt_json = (
             '<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n'
             '{\n'
@@ -141,7 +138,7 @@ class TestVerifyPrTelemetry(unittest.TestCase):
             '}\n'
             'ANTIGRAVITY-TELEMETRY-RECEIPT-END -->'
         )
-        mock_comments.return_value = [receipt_json]
+        mock_comments.return_value = [{"body": receipt_json, "authorAssociation": "OWNER"}]
 
         passed, msg, receipt, head_sha = vpr.verify_pr_telemetry(99)
         self.assertTrue(passed)
@@ -149,19 +146,45 @@ class TestVerifyPrTelemetry(unittest.TestCase):
         self.assertIn("18,605,309", msg)
         self.assertEqual(receipt.get("total_billed_tokens"), 18605309)
 
-    @patch.object(vpr, "get_pr_details")
+    @patch.object(vpr, "get_all_pr_commits_and_head")
     @patch.object(vpr, "get_pr_comments")
-    def test_null_covered_session_ids_handled_safely(self, mock_comments, mock_details):
-        mock_details.return_value = {
-            "headRefOid": "abc12345678",
-            "commits": [
-                {
-                    "oid": "11111111",
-                    "messageHeadline": "commit 1",
-                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
-                }
-            ]
-        }
+    def test_untrusted_commenter_receipt_ignored(self, mock_comments, mock_commits):
+        mock_commits.return_value = (
+            [{
+                "oid": "11111111",
+                "messageHeadline": "commit 1",
+                "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
+            }],
+            "abc12345678"
+        )
+        # Untrusted contributor posting forged receipt with zero billing
+        forged_receipt = (
+            '<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n'
+            '{\n'
+            '  "covered_session_ids": ["53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"],\n'
+            '  "total_billed_tokens": 0\n'
+            '}\n'
+            'ANTIGRAVITY-TELEMETRY-RECEIPT-END -->'
+        )
+        mock_comments.return_value = [
+            {"body": forged_receipt, "author": {"login": "attacker"}, "authorAssociation": "NONE"}
+        ]
+
+        passed, msg, receipt, head_sha = vpr.verify_pr_telemetry(99)
+        self.assertFalse(passed)
+        self.assertIn("MISSING TELEMETRY REPORT", msg)
+
+    @patch.object(vpr, "get_all_pr_commits_and_head")
+    @patch.object(vpr, "get_pr_comments")
+    def test_null_covered_session_ids_handled_safely(self, mock_comments, mock_commits):
+        mock_commits.return_value = (
+            [{
+                "oid": "11111111",
+                "messageHeadline": "commit 1",
+                "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
+            }],
+            "abc12345678"
+        )
         # Explicitly null covered_session_ids
         receipt_json = (
             '<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n'
@@ -171,26 +194,24 @@ class TestVerifyPrTelemetry(unittest.TestCase):
             '}\n'
             'ANTIGRAVITY-TELEMETRY-RECEIPT-END -->'
         )
-        mock_comments.return_value = [receipt_json]
+        mock_comments.return_value = [{"body": receipt_json, "authorAssociation": "OWNER"}]
 
         # Should not raise TypeError: 'NoneType' object is not iterable
         passed, msg, receipt, head_sha = vpr.verify_pr_telemetry(99)
         self.assertFalse(passed)
         self.assertIn("INCOMPLETE SESSION PROVENANCE", msg)
 
-    @patch.object(vpr, "get_pr_details")
+    @patch.object(vpr, "get_all_pr_commits_and_head")
     @patch.object(vpr, "get_pr_comments")
-    def test_malformed_json_receipt_skipped(self, mock_comments, mock_details):
-        mock_details.return_value = {
-            "headRefOid": "abc12345678",
-            "commits": [
-                {
-                    "oid": "11111111",
-                    "messageHeadline": "commit 1",
-                    "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
-                }
-            ]
-        }
+    def test_malformed_json_receipt_skipped(self, mock_comments, mock_commits):
+        mock_commits.return_value = (
+            [{
+                "oid": "11111111",
+                "messageHeadline": "commit 1",
+                "messageBody": "Antigravity-Session-ID: 53ab9a5b-7ca6-4d25-9e39-21463c3bcd6b"
+            }],
+            "abc12345678"
+        )
         valid_receipt = (
             '<!-- ANTIGRAVITY-TELEMETRY-RECEIPT-START\n'
             '{\n'
@@ -205,7 +226,10 @@ class TestVerifyPrTelemetry(unittest.TestCase):
             'ANTIGRAVITY-TELEMETRY-RECEIPT-END -->'
         )
         # Old valid receipt followed by later corrupted receipt
-        mock_comments.return_value = [valid_receipt, corrupted_receipt]
+        mock_comments.return_value = [
+            {"body": valid_receipt, "authorAssociation": "OWNER"},
+            {"body": corrupted_receipt, "authorAssociation": "OWNER"}
+        ]
 
         # Skips corrupted receipt and uses earlier valid receipt
         passed, msg, receipt, head_sha = vpr.verify_pr_telemetry(99)
@@ -216,14 +240,14 @@ class TestVerifyPrTelemetry(unittest.TestCase):
     def test_subprocess_timeout_handling(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd=["gh", "pr", "view"], timeout=60)
         with self.assertRaises(RuntimeError) as ctx:
-            vpr.get_pr_details(99, timeout=60)
+            vpr.get_pr_comments(99, timeout=60)
         self.assertIn("timed out after 60s", str(ctx.exception))
 
     @patch("subprocess.run")
-    def test_post_commit_status(self, mock_run):
+    def test_post_commit_status_endpoint(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         ok, msg = vpr.post_commit_status(
-            sha="e0f5c98d239ec0b8ad2058b9165f13092202d417",
+            sha="4d12d065b787eba2cd86442f6f6735b14a3a0269",
             state="success",
             description="Verified Antigravity session telemetry",
             repo="wryenmeek/pp-docker",
@@ -232,9 +256,49 @@ class TestVerifyPrTelemetry(unittest.TestCase):
         self.assertTrue(ok)
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
-        self.assertIn("repos/wryenmeek/pp-docker/statuses/e0f5c98d239ec0b8ad2058b9165f13092202d417", cmd)
+        # Assert repos/ prefix is present
+        self.assertIn("repos/wryenmeek/pp-docker/statuses/4d12d065b787eba2cd86442f6f6735b14a3a0269", cmd)
         self.assertIn("state=success", cmd)
         self.assertIn("context=Antigravity Telemetry Pre-Merge Guard", cmd)
+
+    @patch("subprocess.run")
+    def test_get_all_pr_commits_pagination(self, mock_run):
+        # Mock GraphQL response with 2 pages
+        page1 = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "headRefOid": "final_sha_123",
+                        "commits": {
+                            "pageInfo": {"hasNextPage": True, "endCursor": "cursor_1"},
+                            "nodes": [{"commit": {"oid": "commit1", "messageHeadline": "head1", "messageBody": "body1"}}]
+                        }
+                    }
+                }
+            }
+        }
+        page2 = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "headRefOid": "final_sha_123",
+                        "commits": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [{"commit": {"oid": "commit2", "messageHeadline": "head2", "messageBody": "body2"}}]
+                        }
+                    }
+                }
+            }
+        }
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=json.dumps(page1)),
+            MagicMock(returncode=0, stdout=json.dumps(page2)),
+        ]
+        commits, head_sha = vpr.get_all_pr_commits_and_head(11, repo="wryenmeek/pp-docker")
+        self.assertEqual(len(commits), 2)
+        self.assertEqual(commits[0]["oid"], "commit1")
+        self.assertEqual(commits[1]["oid"], "commit2")
+        self.assertEqual(head_sha, "final_sha_123")
 
 
 if __name__ == "__main__":
