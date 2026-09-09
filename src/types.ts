@@ -70,3 +70,12 @@ export interface CliJsonOutput {
   results: CliToolResult[];
   summary: CliSummary;
 }
+
+/**
+ * Command executor function type abstraction compatible with execa.
+ */
+export type CommandExecutor = (
+  file: string,
+  args?: readonly string[],
+  options?: any,
+) => Promise<any> | any;

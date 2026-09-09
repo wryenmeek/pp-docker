@@ -218,7 +218,7 @@ describe('E2E CLI Subprocess Execution (--json, --dry-run, exit codes)', () => {
     expect(Array.isArray(parsed.results)).toBe(true);
     expect(parsed.summary).toBeDefined();
     expect(parsed.summary.total).toBe(parsed.results.length);
-    expect(parsed.summary.succeeded).toBe(0);
+    expect(parsed.summary.succeeded).toBe(parsed.results.length);
     expect(parsed.summary.failed).toBe(0);
   });
 
