@@ -9,11 +9,11 @@ import {
   startDockerDesktop,
   verifyDockerAvailable,
   waitForDockerReady,
-} from './docker.js';
-import { ensureProfileExists, registerServer } from './registrar.js';
-import { resolveTool } from './resolver.js';
-import { discoverInstalledTools } from './syncer.js';
-import type { CliOptions } from './types.js';
+} from '#docker.js';
+import { ensureProfileExists, registerServer } from '#registrar.js';
+import { resolveTool } from '#resolver.js';
+import { discoverInstalledTools } from '#syncer.js';
+import type { CliJsonOutput, CliOptions, CliSummary, CliToolResult } from '#types.js';
 
 export async function promptUserToStartDocker(): Promise<boolean> {
   const rl = readline.createInterface({ input, output });
@@ -36,13 +36,83 @@ export interface DockerPreflightOps {
 }
 
 /**
+ * Compute CLI exit code according to Milestone 1 specifications:
+ * - 0: All requested tool operations succeeded (or no tools to process).
+ * - 1: Total failure (e.g. fatal error, preflight failure, or all tools failed).
+ * - 2: Partial failure (at least 1 succeeded and at least 1 failed).
+ */
+export function computeExitCode(summary: CliSummary): number {
+  if (summary.failed === 0) {
+    return 0;
+  }
+  if (summary.succeeded === 0) {
+    return 1;
+  }
+  return 2;
+}
+
+/**
+ * Print decorative banner for a tool being processed in human mode.
+ */
+export function printBanner(input: string): void {
+  console.log('\n======================================================');
+  console.log(`==> Processing: ${input}`);
+  console.log('======================================================');
+}
+
+/**
+ * Emit strictly valid, machine-parseable JSON payload to stdout.
+ */
+export function emitJson(output: CliJsonOutput): void {
+  process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+}
+
+/**
+ * Executes an asynchronous action while suppressing console.log if JSON mode is active.
+ */
+export async function withJsonSuppression<T>(
+  isJson: boolean,
+  action: () => Promise<T>,
+): Promise<T> {
+  if (!isJson) {
+    return action();
+  }
+  const originalLog = console.log;
+  console.log = () => {};
+  try {
+    return await action();
+  } finally {
+    console.log = originalLog;
+  }
+}
+
+/**
+ * Print human-readable summary for batch operations in non-JSON mode.
+ */
+export function printHumanSummary(summary: CliSummary, results: CliToolResult[]): void {
+  console.log('\n--- Batch Summary ---');
+  console.log(
+    `Total: ${summary.total} | Succeeded: ${summary.succeeded} | Failed: ${summary.failed} | Skipped: ${summary.skipped}`,
+  );
+  for (const r of results) {
+    const icon = r.status === 'success' ? '✔' : r.status === 'skipped' ? '⊘' : '❌';
+    const detail = r.error ? ` (${r.error})` : r.imageTag ? ` [${r.imageTag}]` : '';
+    console.log(`  ${icon} ${r.tool}: ${r.status}${detail}`);
+  }
+}
+
+/**
  * Pre-flight check to verify Docker availability unless dry-run, with auto-start support.
  */
 export async function checkDockerPreflight(
-  options: CliOptions,
-  dockerOps: DockerPreflightOps = {},
+  options: CliOptions | boolean,
+  dockerOpsOrJson: DockerPreflightOps | boolean = {},
 ): Promise<boolean> {
-  if (options.dryRun) return true;
+  const opts: CliOptions =
+    typeof options === 'boolean' ? { dryRun: options, json: Boolean(dockerOpsOrJson) } : options;
+  const dockerOps: DockerPreflightOps = typeof dockerOpsOrJson === 'object' ? dockerOpsOrJson : {};
+
+  if (opts.dryRun) return true;
 
   const verifyAvailable = dockerOps.verifyAvailable ?? verifyDockerAvailable;
   const startDesktop = dockerOps.startDesktop ?? startDockerDesktop;
@@ -52,14 +122,14 @@ export async function checkDockerPreflight(
   const isAvailable = await verifyAvailable();
   if (isAvailable) return true;
 
-  let shouldStart = Boolean(options.startDocker);
+  let shouldStart = Boolean(opts.startDocker);
 
-  if (!shouldStart && process.stdout.isTTY && !options.json) {
+  if (!shouldStart && process.stdout.isTTY && !opts.json) {
     shouldStart = await prompter();
   }
 
   if (!shouldStart) {
-    if (!options.json) {
+    if (!opts.json) {
       console.error('❌ Docker daemon is not running. Please launch Docker Desktop and try again.');
     } else {
       console.error(
@@ -71,7 +141,7 @@ export async function checkDockerPreflight(
     return false;
   }
 
-  if (!options.json) {
+  if (!opts.json) {
     console.log('🚀 Attempting to start Docker Desktop...');
   }
 
@@ -79,7 +149,7 @@ export async function checkDockerPreflight(
     await startDesktop();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (!options.json) {
+    if (!opts.json) {
       console.error(`❌ Failed to start Docker Desktop: ${msg}`);
     } else {
       console.error(
@@ -91,7 +161,7 @@ export async function checkDockerPreflight(
     return false;
   }
 
-  if (!options.json) {
+  if (!opts.json) {
     console.log('⏳ Waiting for Docker daemon to become ready...');
   }
 
@@ -99,14 +169,14 @@ export async function checkDockerPreflight(
     timeoutMs: 60_000,
     intervalMs: 2_000,
     onTick: (elapsed, max) => {
-      if (!options.json && process.stdout.isTTY) {
+      if (!opts.json && process.stdout.isTTY) {
         process.stdout.write(`\r⏳ Waiting for Docker Desktop... (${elapsed}s / ${max}s)`);
       }
     },
   });
 
   if (!ready) {
-    if (!options.json) {
+    if (!opts.json) {
       console.error('\n❌ Timed out waiting for Docker Desktop to be ready (60s).');
     } else {
       console.error(
@@ -118,7 +188,7 @@ export async function checkDockerPreflight(
     return false;
   }
 
-  if (!options.json && process.stdout.isTTY) {
+  if (!opts.json && process.stdout.isTTY) {
     console.log('\n✅ Docker Desktop is ready!');
   }
 
@@ -126,39 +196,66 @@ export async function checkDockerPreflight(
 }
 
 /**
- * Helper to process a single tool/URL
+ * Helper to process a single tool/URL and return structured result.
  */
-export async function processTool(inputUrl: string, profile: string, options: CliOptions) {
-  console.log(`\n======================================================`);
-  console.log(`==> Processing: ${inputUrl}`);
-  console.log(`======================================================`);
+export async function processTool(
+  input: string,
+  profile: string,
+  options: CliOptions,
+): Promise<CliToolResult> {
+  if (!options.json) {
+    printBanner(input);
+  }
 
   try {
-    const meta = await resolveTool(inputUrl);
-    console.log(`✔ Found component: ${meta.category}`);
-    console.log(`✔ Go Package: ${meta.packagePath}`);
+    const meta = await resolveTool(input);
+    if (!options.json) {
+      console.log(`✔ Found component: ${meta.category}`);
+      console.log(`✔ Go Package: ${meta.packagePath}`);
+    }
 
-    if (!options.noBuild) {
-      await buildContainerImage(meta, options.dryRun);
+    const noBuild = options.noBuild === true || (options as { build?: boolean }).build === false;
+    if (!noBuild) {
+      await buildContainerImage(meta, Boolean(options.dryRun));
     } else {
-      console.log(`==> Skipping Docker build (--no-build specified).`);
+      if (!options.json) {
+        console.log('==> Skipping Docker build (--no-build specified).');
+      }
     }
 
-    await registerServer(meta, profile, options.dryRun);
+    await registerServer(meta, profile, Boolean(options.dryRun));
 
-    console.log(`\n🎉 Successfully registered '${meta.slug}-pp-mcp' into profile '${profile}'!`);
-    if (meta.requiresAuth) {
-      console.log(`👉 Secret required: ${meta.envKey}`);
-      console.log(
-        `   Set it in Docker Desktop or run: docker mcp secret set ${meta.slug}-pp-mcp.api_key="<YOUR_KEY>"`,
-      );
+    if (!options.json) {
+      console.log(`\n🎉 Successfully registered '${meta.slug}-pp-mcp' into profile '${profile}'!`);
+      if (meta.requiresAuth) {
+        console.log(`👉 Secret required: ${meta.envKey}`);
+        console.log(
+          `   Set it in Docker Desktop or run: docker mcp secret set ${meta.slug}-pp-mcp.api_key="<YOUR_KEY>"`,
+        );
+      }
     }
+
+    return {
+      tool: input,
+      status: 'success',
+      imageTag: meta.imageTag,
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`❌ Error processing '${inputUrl}': ${msg}`);
+    if (!options.json) {
+      console.error(`❌ Error processing '${input}': ${msg}`);
+    }
+    return {
+      tool: input,
+      status: 'failed',
+      error: msg,
+    };
   }
 }
 
+/**
+ * Create and configure the Commander program instance.
+ */
 export function createProgram(): Command {
   const program = new Command();
 
@@ -174,8 +271,9 @@ export function createProgram(): Command {
       process.env.MCP_PROFILE || 'printing-press',
     )
     .option('--dry-run', 'Preview actions without building or modifying Docker', false)
-    .option('--no-build', 'Skip building the Docker image, only register the YAML spec', false)
-    .option('--start-docker', 'Automatically launch Docker Desktop if not running', false);
+    .option('--no-build', 'Skip building the Docker image, only register the YAML spec')
+    .option('--start-docker', 'Automatically launch Docker Desktop if not running', false)
+    .option('--json', 'Emit structured, machine-parseable JSON on stdout', false);
 
   // 1. Command: install
   program
@@ -184,31 +282,84 @@ export function createProgram(): Command {
     .argument('<tools...>', 'One or more tool names or release URLs')
     .option('--no-npm', 'Skip running upstream npm installer for native skill/cli', false)
     .option('--start-docker', 'Automatically launch Docker Desktop if not running', false)
-    .action(async (tools: string[], cmdOptions) => {
-      const opts = program.opts();
-      const profile = opts.profile;
+    .option('--json', 'Emit structured, machine-parseable JSON on stdout', false)
+    .action(async (tools: string[], _cmdOpts, cmd: Command) => {
+      const opts = cmd.optsWithGlobals<CliOptions & { npm?: boolean }>();
+      const profile = opts.profile || 'printing-press';
+      const isJson = Boolean(opts.json);
 
-      if (!opts.noBuild && !(await checkDockerPreflight(opts))) {
-        process.exit(1);
-      }
-
-      for (const tool of tools) {
-        // 1. Run upstream installer if not disabled
-        if (cmdOptions.npm && !opts.dryRun) {
-          console.log(`\n==> Installing native CLI/skill for '${tool}' via npx...`);
-          try {
-            await execa('npx', ['-y', '@mvanhorn/printing-press-library', 'install', tool], {
-              stdio: 'inherit',
+      await withJsonSuppression(isJson, async () => {
+        const noBuild = opts.noBuild === true || (opts as { build?: boolean }).build === false;
+        if (!noBuild && !(await checkDockerPreflight(opts))) {
+          if (isJson) {
+            const results: CliToolResult[] = tools.map((tool) => ({
+              tool,
+              status: 'failed',
+              error: 'Docker daemon is not running. Please launch Docker Desktop and try again.',
+            }));
+            const summary: CliSummary = {
+              total: tools.length,
+              succeeded: 0,
+              failed: tools.length,
+              skipped: 0,
+            };
+            emitJson({
+              command: 'install',
+              profile,
+              dryRun: Boolean(opts.dryRun),
+              results,
+              summary,
             });
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            console.warn(`⚠️ Upstream installer warning for '${tool}': ${msg}`);
           }
+          process.exitCode = 1;
+          return;
         }
 
-        // 2. Build & register with Docker MCP
-        await processTool(tool, profile, opts);
-      }
+        const results: CliToolResult[] = [];
+        for (const tool of tools) {
+          if (opts.npm && !opts.dryRun) {
+            if (!isJson) {
+              console.log(`\n==> Installing native CLI/skill for '${tool}' via npx...`);
+            }
+            try {
+              await execa('npx', ['-y', '@mvanhorn/printing-press-library', 'install', tool], {
+                stdio: isJson ? 'ignore' : 'inherit',
+              });
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              if (!isJson) {
+                console.warn(`⚠️ Upstream installer warning for '${tool}': ${msg}`);
+              }
+            }
+          }
+
+          const res = await processTool(tool, profile, opts);
+          results.push(res);
+        }
+
+        const summary: CliSummary = {
+          total: results.length,
+          succeeded: results.filter((r) => r.status === 'success').length,
+          failed: results.filter((r) => r.status === 'failed').length,
+          skipped: results.filter((r) => r.status === 'skipped').length,
+        };
+
+        const exitCode = computeExitCode(summary);
+
+        if (isJson) {
+          emitJson({
+            command: 'install',
+            profile,
+            dryRun: Boolean(opts.dryRun),
+            results,
+            summary,
+          });
+        } else if (results.length > 1 || summary.failed > 0) {
+          printHumanSummary(summary, results);
+        }
+
+        process.exitCode = exitCode;
+      });
     });
 
   // 2. Command: register
@@ -219,17 +370,68 @@ export function createProgram(): Command {
     )
     .argument('<tools...>', 'One or more tool names, tags, or release URLs')
     .option('--start-docker', 'Automatically launch Docker Desktop if not running', false)
-    .action(async (tools: string[]) => {
-      const opts = program.opts();
-      const profile = opts.profile;
+    .option('--json', 'Emit structured, machine-parseable JSON on stdout', false)
+    .action(async (tools: string[], _cmdOpts, cmd: Command) => {
+      const opts = cmd.optsWithGlobals<CliOptions>();
+      const profile = opts.profile || 'printing-press';
+      const isJson = Boolean(opts.json);
 
-      if (!opts.noBuild && !(await checkDockerPreflight(opts))) {
-        process.exit(1);
-      }
+      await withJsonSuppression(isJson, async () => {
+        const noBuild = opts.noBuild === true || (opts as { build?: boolean }).build === false;
+        if (!noBuild && !(await checkDockerPreflight(opts))) {
+          if (isJson) {
+            const results: CliToolResult[] = tools.map((tool) => ({
+              tool,
+              status: 'failed',
+              error: 'Docker daemon is not running. Please launch Docker Desktop and try again.',
+            }));
+            const summary: CliSummary = {
+              total: tools.length,
+              succeeded: 0,
+              failed: tools.length,
+              skipped: 0,
+            };
+            emitJson({
+              command: 'register',
+              profile,
+              dryRun: Boolean(opts.dryRun),
+              results,
+              summary,
+            });
+          }
+          process.exitCode = 1;
+          return;
+        }
 
-      for (const tool of tools) {
-        await processTool(tool, profile, opts);
-      }
+        const results: CliToolResult[] = [];
+        for (const tool of tools) {
+          const res = await processTool(tool, profile, opts);
+          results.push(res);
+        }
+
+        const summary: CliSummary = {
+          total: results.length,
+          succeeded: results.filter((r) => r.status === 'success').length,
+          failed: results.filter((r) => r.status === 'failed').length,
+          skipped: results.filter((r) => r.status === 'skipped').length,
+        };
+
+        const exitCode = computeExitCode(summary);
+
+        if (isJson) {
+          emitJson({
+            command: 'register',
+            profile,
+            dryRun: Boolean(opts.dryRun),
+            results,
+            summary,
+          });
+        } else if (results.length > 1 || summary.failed > 0) {
+          printHumanSummary(summary, results);
+        }
+
+        process.exitCode = exitCode;
+      });
     });
 
   // 3. Command: sync
@@ -237,54 +439,153 @@ export function createProgram(): Command {
     .command('sync')
     .description('Scan all installed printing-press CLIs and register missing ones into Docker MCP')
     .option('--start-docker', 'Automatically launch Docker Desktop if not running', false)
-    .action(async () => {
-      const opts = program.opts();
-      const profile = opts.profile;
+    .option('--json', 'Emit structured, machine-parseable JSON on stdout', false)
+    .action(async (_cmdOpts, cmd: Command) => {
+      const opts = cmd.optsWithGlobals<CliOptions>();
+      const profile = opts.profile || 'printing-press';
+      const isJson = Boolean(opts.json);
 
-      console.log('==> Scanning for locally installed printing-press tools...');
-      const installed = await discoverInstalledTools();
+      await withJsonSuppression(isJson, async () => {
+        if (!isJson) {
+          console.log('==> Scanning for locally installed printing-press tools...');
+        }
+        const installed = await discoverInstalledTools();
 
-      if (installed.length === 0) {
-        console.log('No printing-press tools detected in ~/.local/bin or via npm.');
-        console.log('Install one using: pp-docker install <tool>');
-        return;
-      }
+        if (installed.length === 0) {
+          if (isJson) {
+            emitJson({
+              command: 'sync',
+              profile,
+              dryRun: Boolean(opts.dryRun),
+              results: [],
+              summary: { total: 0, succeeded: 0, failed: 0, skipped: 0 },
+            });
+          } else {
+            console.log('No printing-press tools detected in ~/.local/bin or via npm.');
+            console.log('Install one using: pp-docker install <tool>');
+          }
+          process.exitCode = 0;
+          return;
+        }
 
-      if (!opts.noBuild && !(await checkDockerPreflight(opts))) {
-        process.exit(1);
-      }
+        const noBuild = opts.noBuild === true || (opts as { build?: boolean }).build === false;
+        if (!noBuild && !(await checkDockerPreflight(opts))) {
+          if (isJson) {
+            const results: CliToolResult[] = installed.map((tool) => ({
+              tool,
+              status: 'failed',
+              error: 'Docker daemon is not running. Please launch Docker Desktop and try again.',
+            }));
+            const summary: CliSummary = {
+              total: installed.length,
+              succeeded: 0,
+              failed: installed.length,
+              skipped: 0,
+            };
+            emitJson({
+              command: 'sync',
+              profile,
+              dryRun: Boolean(opts.dryRun),
+              results,
+              summary,
+            });
+          }
+          process.exitCode = 1;
+          return;
+        }
 
-      if (!opts.dryRun) {
-        await ensureProfileExists(profile);
-      }
+        if (!opts.dryRun) {
+          try {
+            await ensureProfileExists(profile);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (isJson) {
+              const results: CliToolResult[] = installed.map((tool) => ({
+                tool,
+                status: 'failed',
+                error: `Failed to ensure profile '${profile}': ${msg}`,
+              }));
+              const summary: CliSummary = {
+                total: installed.length,
+                succeeded: 0,
+                failed: installed.length,
+                skipped: 0,
+              };
+              emitJson({
+                command: 'sync',
+                profile,
+                dryRun: false,
+                results,
+                summary,
+              });
+            } else {
+              console.error(`❌ Failed to ensure profile '${profile}': ${msg}`);
+            }
+            process.exitCode = 1;
+            return;
+          }
+        }
 
-      console.log(`Found ${installed.length} tool(s): ${installed.join(', ')}`);
+        if (!isJson) {
+          console.log(`Found ${installed.length} tool(s): ${installed.join(', ')}`);
+        }
 
-      for (const tool of installed) {
-        await processTool(tool, profile, opts);
-      }
+        const results: CliToolResult[] = [];
+        for (const tool of installed) {
+          const res = await processTool(tool, profile, opts);
+          results.push(res);
+        }
 
-      console.log(`\n✔ Sync complete across profile '${profile}'!`);
-      if (!opts.dryRun) {
-        try {
-          await execa('docker', ['mcp', 'profile', 'show', profile], { stdio: 'inherit' });
-        } catch {}
-      }
+        const summary: CliSummary = {
+          total: results.length,
+          succeeded: results.filter((r) => r.status === 'success').length,
+          failed: results.filter((r) => r.status === 'failed').length,
+          skipped: results.filter((r) => r.status === 'skipped').length,
+        };
+
+        if (!isJson) {
+          console.log(`\n✔ Sync complete across profile '${profile}'!`);
+          if (!opts.dryRun) {
+            try {
+              await execa('docker', ['mcp', 'profile', 'show', profile], {
+                stdio: 'inherit',
+              });
+            } catch {}
+          }
+          if (results.length > 1 || summary.failed > 0) {
+            printHumanSummary(summary, results);
+          }
+        } else {
+          emitJson({
+            command: 'sync',
+            profile,
+            dryRun: Boolean(opts.dryRun),
+            results,
+            summary,
+          });
+        }
+
+        const exitCode = computeExitCode(summary);
+        process.exitCode = exitCode;
+      });
     });
 
   return program;
 }
 
-export const program = createProgram();
+const program = createProgram();
 
 const isDirectRun =
   Boolean(import.meta.main) ||
   (process.argv[1]
-    ? process.argv[1].endsWith('/cli.js') ||
-      process.argv[1].endsWith('/cli.ts') ||
-      process.argv[1].endsWith('/pp-docker')
+    ? process.argv[1].endsWith('/cli.js') || process.argv[1].endsWith('/cli.ts')
     : false);
 
 if (isDirectRun) {
-  program.parse(process.argv);
+  program.parseAsync(process.argv).catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
 }
+
+export { program };

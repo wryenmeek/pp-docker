@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execa } from 'execa';
 import YAML from 'yaml';
-import type { DockerMcpServerSpec, ToolMeta } from './types.js';
+import type { CommandExecutor, DockerMcpServerSpec, ToolMeta } from '#types.js';
 
 /**
  * Builds the Docker MCP Server specification object.
@@ -35,16 +35,19 @@ export function createServerSpec(meta: ToolMeta): DockerMcpServerSpec {
 /**
  * Ensures that the requested Docker MCP profile exists.
  */
-export async function ensureProfileExists(profile: string): Promise<void> {
+export async function ensureProfileExists(
+  profile: string,
+  executor: CommandExecutor = execa,
+): Promise<void> {
   try {
-    const listRes = await execa('docker', ['mcp', 'profile', 'list', '--format', 'json']);
+    const listRes = await executor('docker', ['mcp', 'profile', 'list', '--format', 'json']);
     if (!listRes.stdout.includes(`"${profile}"`)) {
       console.log(`==> Creating profile '${profile}'...`);
-      await execa('docker', ['mcp', 'profile', 'create', '--name', profile, '--id', profile]);
+      await executor('docker', ['mcp', 'profile', 'create', '--name', profile, '--id', profile]);
     }
   } catch {
     try {
-      await execa('docker', ['mcp', 'profile', 'create', '--name', profile, '--id', profile]);
+      await executor('docker', ['mcp', 'profile', 'create', '--name', profile, '--id', profile]);
     } catch {
       // Profile likely already exists
     }
@@ -59,10 +62,12 @@ export async function registerServer(
   meta: ToolMeta,
   profile: string = 'printing-press',
   dryRun: boolean = false,
+  executor: CommandExecutor = execa,
+  catalogsDir?: string,
 ): Promise<{ yamlPath: string }> {
-  const catalogsDir = path.join(os.homedir(), '.docker', 'mcp', 'catalogs');
+  const baseCatalogsDir = catalogsDir || path.join(os.homedir(), '.docker', 'mcp', 'catalogs');
   const yamlFileName = `${meta.slug}-pp-mcp.yaml`;
-  const yamlPath = path.join(catalogsDir, yamlFileName);
+  const yamlPath = path.join(baseCatalogsDir, yamlFileName);
 
   const spec = createServerSpec(meta);
   const yamlContent = YAML.stringify(spec);
@@ -75,16 +80,16 @@ export async function registerServer(
   }
 
   // 1. Write YAML spec file into ~/.docker/mcp/catalogs/
-  await fs.mkdir(catalogsDir, { recursive: true });
+  await fs.mkdir(baseCatalogsDir, { recursive: true });
   await fs.writeFile(yamlPath, yamlContent, 'utf-8');
   console.log(`==> Server spec written to: ${yamlPath}`);
 
   // 2. Ensure profile exists
-  await ensureProfileExists(profile);
+  await ensureProfileExists(profile, executor);
 
   // 3. Register server in profile
   console.log(`==> Registering '${meta.slug}-pp-mcp' in profile '${profile}'...`);
-  await execa('docker', [
+  await executor('docker', [
     'mcp',
     'profile',
     'server',

@@ -1,5 +1,5 @@
 import { execa } from 'execa';
-import type { CommandExecutor, ToolMeta } from './types.js';
+import type { CommandExecutor, ToolMeta } from '#types.js';
 
 /**
  * Checks if the Docker daemon is accessible.

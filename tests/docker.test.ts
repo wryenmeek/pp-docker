@@ -34,68 +34,98 @@ describe('docker module', () => {
 
   describe('verifyDockerAvailable', () => {
     it('returns true when docker info succeeds', async () => {
+      const calls: Array<{ file: string; args?: readonly string[] }> = [];
       const mockExecutor: CommandExecutor = async (file, args) => {
-        expect(file).toBe('docker');
-        expect(args).toEqual(['info', '--format', '{{.ServerVersion}}']);
-        return { stdout: '24.0.5' };
+        calls.push({ file, args });
+        return { stdout: '24.0.7', exitCode: 0 };
       };
-      const result = await verifyDockerAvailable(mockExecutor);
-      expect(result).toBe(true);
+
+      const available = await verifyDockerAvailable(mockExecutor);
+      expect(available).toBe(true);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toEqual({
+        file: 'docker',
+        args: ['info', '--format', '{{.ServerVersion}}'],
+      });
     });
 
-    it('returns false when docker info throws', async () => {
+    it('returns false when docker info throws an error', async () => {
       const mockExecutor: CommandExecutor = async () => {
-        throw new Error('daemon not running');
+        throw new Error('Docker daemon not running');
       };
-      const result = await verifyDockerAvailable(mockExecutor);
-      expect(result).toBe(false);
+
+      const available = await verifyDockerAvailable(mockExecutor);
+      expect(available).toBe(false);
     });
 
-    it('uses default execa when no executor provided', async () => {
-      const result = await verifyDockerAvailable();
-      expect(typeof result).toBe('boolean');
+    it('uses default execa executor when none provided', async () => {
+      const isAvailable = await verifyDockerAvailable();
+      expect(typeof isAvailable).toBe('boolean');
     });
   });
 
   describe('buildContainerImage', () => {
-    it('handles dry-run builds without invoking docker', async () => {
-      let called = false;
+    it('handles dry-run builds without checking docker or building', async () => {
+      let executorCalled = false;
       const mockExecutor: CommandExecutor = async () => {
-        called = true;
-        return {};
+        executorCalled = true;
       };
-      await buildContainerImage(dummyMeta, true, mockExecutor);
-      expect(called).toBe(false);
+
+      await expect(buildContainerImage(dummyMeta, true, mockExecutor)).resolves.toBeUndefined();
+      expect(executorCalled).toBe(false);
     });
 
-    it('throws error when docker daemon is not running in non-dry-run', async () => {
-      const mockExecutor: CommandExecutor = async () => {
-        throw new Error('daemon offline');
+    it('handles dry-run builds with default executor parameter', async () => {
+      await expect(buildContainerImage(dummyMeta, true)).resolves.toBeUndefined();
+    });
+
+    it('throws informative error when docker daemon is offline', async () => {
+      const mockExecutor: CommandExecutor = async (_file, args = []) => {
+        if (args[0] === 'info') {
+          throw new Error('connect ENOENT /var/run/docker.sock');
+        }
+        return { stdout: '', exitCode: 0 };
       };
+
       await expect(buildContainerImage(dummyMeta, false, mockExecutor)).rejects.toThrow(
         'Docker daemon is not running. Please launch Docker Desktop and try again.',
       );
     });
 
-    it('builds container image when docker is available', async () => {
-      const calls: Array<{
-        file: string;
-        args?: readonly string[];
-        options?: any;
-      }> = [];
+    it('executes docker build with stdin input when daemon is online', async () => {
+      const calls: Array<{ file: string; args?: readonly string[]; options?: any }> = [];
       const mockExecutor: CommandExecutor = async (file, args, options) => {
         calls.push({ file, args, options });
-        return { stdout: 'Successfully built' };
+        return { stdout: 'Successfully built image', exitCode: 0 };
       };
 
       await buildContainerImage(dummyMeta, false, mockExecutor);
 
-      expect(calls.length).toBe(2);
-      expect(calls[0].file).toBe('docker');
-      expect(calls[0].args).toEqual(['info', '--format', '{{.ServerVersion}}']);
+      expect(calls).toHaveLength(2);
+      expect(calls[0]).toEqual({
+        file: 'docker',
+        args: ['info', '--format', '{{.ServerVersion}}'],
+        options: undefined,
+      });
       expect(calls[1].file).toBe('docker');
       expect(calls[1].args).toEqual(['build', '-t', dummyMeta.imageTag, '-']);
-      expect(calls[1].options?.input).toContain('FROM golang:alpine AS builder');
+      expect(calls[1].options?.input).toBe(generateDockerfile(dummyMeta));
+    });
+
+    it('propagates error when docker build fails', async () => {
+      const mockExecutor: CommandExecutor = async (_file, args = []) => {
+        if (args[0] === 'info') {
+          return { stdout: '24.0.7', exitCode: 0 };
+        }
+        if (args[0] === 'build') {
+          throw new Error('docker build failed: syntax error in Dockerfile');
+        }
+        return { stdout: '', exitCode: 0 };
+      };
+
+      await expect(buildContainerImage(dummyMeta, false, mockExecutor)).rejects.toThrow(
+        'docker build failed: syntax error in Dockerfile',
+      );
     });
   });
 

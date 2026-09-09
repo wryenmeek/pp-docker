@@ -49,3 +49,34 @@ export interface CliOptions {
   json?: boolean;
   startDocker?: boolean;
 }
+
+/**
+ * Result of processing a single tool.
+ */
+export interface CliToolResult {
+  tool: string;
+  status: 'success' | 'failed' | 'skipped';
+  imageTag?: string;
+  error?: string;
+}
+
+/**
+ * Batch execution summary.
+ */
+export interface CliSummary {
+  total: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+}
+
+/**
+ * Structured JSON payload emitted on stdout when --json is specified.
+ */
+export interface CliJsonOutput {
+  command: 'sync' | 'register' | 'install';
+  profile: string;
+  dryRun: boolean;
+  results: CliToolResult[];
+  summary: CliSummary;
+}
