@@ -300,6 +300,48 @@ class TestVerifyPrTelemetry(unittest.TestCase):
         self.assertEqual(commits[1]["oid"], "commit2")
         self.assertEqual(head_sha, "final_sha_123")
 
+    @patch("subprocess.run")
+    def test_pagination_fails_closed_on_mid_page_error(self, mock_run):
+        page1 = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "headRefOid": "final_sha_123",
+                        "commits": {
+                            "pageInfo": {"hasNextPage": True, "endCursor": "cursor_1"},
+                            "nodes": [{"commit": {"oid": "commit1", "messageHeadline": "head1", "messageBody": "body1"}}]
+                        }
+                    }
+                }
+            }
+        }
+        # Case A: non-zero returncode on second page
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=json.dumps(page1)),
+            MagicMock(returncode=1, stdout="", stderr="GraphQL internal error"),
+        ]
+        with self.assertRaises(RuntimeError) as ctx:
+            vpr.get_all_pr_commits_and_head(11, repo="wryenmeek/pp-docker")
+        self.assertIn("GraphQL pagination failed on PR #11 (cursor cursor_1)", str(ctx.exception))
+
+        # Case B: timeout on second page
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=json.dumps(page1)),
+            subprocess.TimeoutExpired(cmd=["gh", "api", "graphql"], timeout=60),
+        ]
+        with self.assertRaises(RuntimeError) as ctx:
+            vpr.get_all_pr_commits_and_head(11, repo="wryenmeek/pp-docker")
+        self.assertIn("GitHub CLI timed out after 60s fetching PR #11 commits (cursor: cursor_1)", str(ctx.exception))
+
+        # Case C: malformed json on second page
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=json.dumps(page1)),
+            MagicMock(returncode=0, stdout="Not Valid JSON", stderr=""),
+        ]
+        with self.assertRaises(RuntimeError) as ctx:
+            vpr.get_all_pr_commits_and_head(11, repo="wryenmeek/pp-docker")
+        self.assertIn("Malformed GraphQL response on PR #11 (cursor cursor_1)", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -97,34 +97,46 @@ def get_all_pr_commits_and_head(
 
             try:
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-                if res.returncode != 0:
-                    break
+            except subprocess.TimeoutExpired as te:
+                raise RuntimeError(f"GitHub CLI timed out after {timeout}s fetching PR #{pr_num} commits (cursor: {cursor})") from te
+
+            if res.returncode != 0:
+                if not cursor and not commits:
+                    break  # Fall back to gh pr view on first-page GraphQL failure
+                raise RuntimeError(f"GraphQL pagination failed on PR #{pr_num} (cursor {cursor}): {res.stderr.strip()}")
+
+            try:
                 data = json.loads(res.stdout)
-                pr_obj = data.get("data", {}).get("repository", {}).get("pullRequest")
-                if not pr_obj:
+            except json.JSONDecodeError as je:
+                if not cursor and not commits:
                     break
-                if not head_sha:
-                    head_sha = pr_obj.get("headRefOid")
-                commits_obj = pr_obj.get("commits", {})
-                for node in commits_obj.get("nodes", []):
-                    c = node.get("commit", {})
-                    commits.append({
-                        "oid": c.get("oid", ""),
-                        "messageHeadline": c.get("messageHeadline", ""),
-                        "messageBody": c.get("messageBody", "")
-                    })
-                page_info = commits_obj.get("pageInfo", {})
-                if page_info.get("hasNextPage") and page_info.get("endCursor"):
-                    cursor = page_info.get("endCursor")
-                else:
+                raise RuntimeError(f"Malformed GraphQL response on PR #{pr_num} (cursor {cursor}): {je}") from je
+
+            pr_obj = data.get("data", {}).get("repository", {}).get("pullRequest")
+            if not pr_obj:
+                if not cursor and not commits:
                     break
-            except Exception:
-                break
+                raise RuntimeError(f"Missing pullRequest data in GraphQL response for PR #{pr_num}")
 
-    if commits:
-        return commits, head_sha
+            if not head_sha:
+                head_sha = pr_obj.get("headRefOid")
 
-    # Fallback to standard gh pr view
+            commits_obj = pr_obj.get("commits", {})
+            for node in commits_obj.get("nodes", []):
+                c = node.get("commit", {})
+                commits.append({
+                    "oid": c.get("oid", ""),
+                    "messageHeadline": c.get("messageHeadline", ""),
+                    "messageBody": c.get("messageBody", "")
+                })
+
+            page_info = commits_obj.get("pageInfo", {})
+            if page_info.get("hasNextPage") and page_info.get("endCursor"):
+                cursor = page_info.get("endCursor")
+            else:
+                return commits, head_sha
+
+    # Fallback to standard gh pr view only when GraphQL was never used / failed upfront
     cmd = ["gh", "pr", "view", str(pr_num), "--json", "commits,headRefOid,headRefName"]
     if repo:
         cmd.extend(["-R", repo])
